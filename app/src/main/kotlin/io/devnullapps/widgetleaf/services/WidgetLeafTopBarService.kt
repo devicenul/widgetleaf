@@ -1,6 +1,7 @@
 package io.devnullapps.widgetleaf.services
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.KeyguardManager
 import android.content.ComponentName
 import android.content.Context
@@ -10,20 +11,23 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import io.devnullapps.widgetleaf.R
 import io.devnullapps.widgetleaf.domain.model.OverlaySettings
-import io.devnullapps.widgetleaf.domain.model.TopBarPosition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,9 +38,10 @@ import kotlinx.coroutines.launch
 /**
  * Lightweight desktop top-bar overlay & global hotkey service for Googlebook / Android Desktop.
  *
- * Draws a clickable WidgetLeaf icon inside the status bar's `DesktopStatusBarSpacer` region on
- * either the Left or Right, coexisting side-by-side with BentoBar (`com.meridian11.books.bentobar`)
- * without overlap, and intercepts the user's global hotkey to toggle the widget pane from any app.
+ * Draws a small, native status-bar-style leaf icon inside the desktop status bar's
+ * `DesktopStatusBarSpacer` region on either the Left or Right, coexisting side-by-side with
+ * BentoBar (`com.meridian11.books.bentobar`) without overlap, and intercepts the user's global
+ * hotkey to toggle the widget pane from any app.
  */
 class WidgetLeafTopBarService : AccessibilityService() {
 
@@ -45,9 +50,12 @@ class WidgetLeafTopBarService : AccessibilityService() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var keyguardManager: KeyguardManager
+    private lateinit var powerManager: PowerManager
 
     private var currentSettings: OverlaySettings = OverlaySettings()
     private var stripContainer: FrameLayout? = null
+    private var hoverPillBg: GradientDrawable? = null
+    private var iconView: ImageView? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private var isWindowAttached = false
 
@@ -55,11 +63,21 @@ class WidgetLeafTopBarService : AccessibilityService() {
         refreshTopBarPlacement()
     }
 
+    private val periodicPollRunnable = object : Runnable {
+        override fun run() {
+            if (powerManager.isInteractive && currentSettings.pinToTopBar) {
+                refreshTopBarPlacement()
+            }
+            mainHandler.postDelayed(this, 2500L)
+        }
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         windowManager = getSystemService(WindowManager::class.java)
         keyguardManager = getSystemService(KeyguardManager::class.java)
+        powerManager = getSystemService(PowerManager::class.java)
 
         serviceScope.launch {
             DefaultServicesContainer.getPreferencesDataStore(applicationContext)
@@ -74,11 +92,14 @@ class WidgetLeafTopBarService : AccessibilityService() {
                     updateStripVisibilityAndPosition()
                 }
         }
+
+        mainHandler.removeCallbacks(periodicPollRunnable)
+        mainHandler.postDelayed(periodicPollRunnable, 2000L)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
-            scheduleRescan()
+            scheduleSettlingRescans()
         }
     }
 
@@ -95,22 +116,35 @@ class WidgetLeafTopBarService : AccessibilityService() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        scheduleRescan()
+        updateIconTintForConfiguration()
+        scheduleSettlingRescans()
     }
 
     override fun onInterrupt() = Unit
 
+    override fun onUnbind(intent: Intent?): Boolean {
+        shutdown()
+        return super.onUnbind(intent)
+    }
+
     override fun onDestroy() {
-        instance = null
-        mainHandler.removeCallbacks(rescanRunnable)
-        detachWindowIfNeeded()
-        serviceScope.cancel()
+        shutdown()
         super.onDestroy()
     }
 
-    private fun scheduleRescan() {
+    private fun shutdown() {
+        if (instance === this) {
+            instance = null
+        }
+        mainHandler.removeCallbacksAndMessages(null)
+        detachWindowIfNeeded()
+        serviceScope.cancel()
+    }
+
+    private fun scheduleSettlingRescans() {
         mainHandler.removeCallbacks(rescanRunnable)
         mainHandler.postDelayed(rescanRunnable, 80L)
+        mainHandler.postDelayed(rescanRunnable, 400L)
     }
 
     private fun updateStripVisibilityAndPosition() {
@@ -126,29 +160,38 @@ class WidgetLeafTopBarService : AccessibilityService() {
         if (isWindowAttached && stripContainer != null) return
 
         val density = resources.displayMetrics.density
-        val buttonSizePx = (28 * density).toInt()
-        val iconSizePx = (18 * density).toInt()
-        val horizontalPadPx = (4 * density).toInt()
+        val slotWidthPx = (28 * density).toInt()
+        val glyphSizePx = (16 * density).toInt()
+        val hoverHeightPx = (22 * density).toInt()
 
-        val pillBg = GradientDrawable().apply {
+        val hoverBg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = 14f * density
-            setColor(Color.argb(46, 16, 185, 129)) // subtle emerald glass tint
-            setStroke((1 * density).toInt().coerceAtLeast(1), Color.argb(96, 52, 211, 153))
+            cornerRadius = 11f * density
+            setColor(Color.TRANSPARENT)
         }
+        hoverPillBg = hoverBg
 
-        val iconView = ImageView(this).apply {
+        val leafGlyph = ImageView(this).apply {
             setImageResource(R.drawable.ic_qs_tile_leaf)
-            setColorFilter(Color.parseColor("#34D399"))
+            setColorFilter(Color.WHITE)
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
+        iconView = leafGlyph
+        updateIconTintForConfiguration()
 
-        val buttonFrame = FrameLayout(this).apply {
-            background = pillBg
+        val hoverFrame = FrameLayout(this).apply {
+            background = hoverBg
+            addView(
+                leafGlyph,
+                FrameLayout.LayoutParams(glyphSizePx, glyphSizePx, Gravity.CENTER)
+            )
+        }
+
+        val rootContainer = FrameLayout(this).apply {
             contentDescription = getString(R.string.app_name)
             addView(
-                iconView,
-                FrameLayout.LayoutParams(iconSizePx, iconSizePx, Gravity.CENTER)
+                hoverFrame,
+                FrameLayout.LayoutParams(slotWidthPx, hoverHeightPx, Gravity.CENTER)
             )
             setOnClickListener {
                 ActiveDisplayLaunchHelper.launchOverlay(
@@ -162,6 +205,17 @@ class WidgetLeafTopBarService : AccessibilityService() {
                     ActiveDisplayLaunchHelper.ACTION_OPEN_OVERLAY_SETTINGS
                 )
                 true
+            }
+            setOnHoverListener { _, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_HOVER_ENTER -> {
+                        hoverBg.setColor(Color.argb(42, 255, 255, 255))
+                    }
+                    MotionEvent.ACTION_HOVER_EXIT -> {
+                        hoverBg.setColor(Color.TRANSPARENT)
+                    }
+                }
+                false
             }
             setOnGenericMotionListener { _, event ->
                 val isSecondary = (event.buttonState and MotionEvent.BUTTON_SECONDARY) != 0 ||
@@ -178,18 +232,14 @@ class WidgetLeafTopBarService : AccessibilityService() {
             }
         }
 
-        val rootContainer = FrameLayout(this).apply {
-            setPadding(horizontalPadPx, 0, horizontalPadPx, 0)
-            addView(
-                buttonFrame,
-                FrameLayout.LayoutParams(buttonSizePx, buttonSizePx, Gravity.CENTER)
-            )
-        }
+        val insetTop = windowManager.currentWindowMetrics.windowInsets
+            .getInsetsIgnoringVisibility(WindowInsets.Type.statusBars())
+            .top
+        val initialHeightPx = if (insetTop > 0) insetTop else (36 * density).toInt()
 
-        val defaultBarHeightPx = (36 * density).toInt()
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            defaultBarHeightPx,
+            slotWidthPx,
+            initialHeightPx,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
@@ -198,11 +248,11 @@ class WidgetLeafTopBarService : AccessibilityService() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.LEFT
-            x = (176 * density).toInt()
+            x = (174 * density).toInt()
             y = 0
             layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-            title = "WidgetLeafTopBar"
+            title = StatusBarSpaceScanner.WIDGET_LEAF_WINDOW_TITLE
         }
 
         try {
@@ -215,34 +265,39 @@ class WidgetLeafTopBarService : AccessibilityService() {
         }
     }
 
+    private fun updateIconTintForConfiguration() {
+        // Desktop top bar uses crisp white status bar glyphs
+        iconView?.setColorFilter(Color.WHITE)
+    }
+
     private fun refreshTopBarPlacement() {
         val container = stripContainer ?: return
         val params = layoutParams ?: return
         if (!isWindowAttached || !currentSettings.pinToTopBar) {
-            container.visibility = View.GONE
+            container.visibility = View.INVISIBLE
             return
         }
 
-        if (keyguardManager.isKeyguardLocked) {
-            container.visibility = View.GONE
+        if (!powerManager.isInteractive || keyguardManager.isKeyguardLocked) {
+            container.visibility = View.INVISIBLE
             return
         }
 
         val density = resources.displayMetrics.density
         val gapPx = (6 * density).toInt()
-        val itemWidthPx = (36 * density).toInt()
+        val itemWidthPx = (28 * density).toInt()
 
-        val scanResult = StatusBarSpaceScanner.scan(this)
+        val scanResult = StatusBarSpaceScanner.scan(this, windowManager)
         if (scanResult != null) {
             if (scanResult.shouldHideForFullscreenOrSystemPanel) {
-                container.visibility = View.GONE
+                container.visibility = View.INVISIBLE
                 return
             }
 
             val placement = StatusBarSpaceScanner.computeCoexistingPlacement(
                 barBounds = scanResult.barBounds,
                 freeSpace = scanResult.freeSpace,
-                otherTopBarOverlays = emptyList(),
+                otherTopBarOverlays = scanResult.otherTopBarOverlays,
                 position = currentSettings.topBarPosition,
                 itemWidthPx = itemWidthPx,
                 screenWidth = scanResult.screenWidth,
@@ -253,11 +308,13 @@ class WidgetLeafTopBarService : AccessibilityService() {
             if (params.gravity != placement.gravity ||
                 params.x != placement.x ||
                 params.y != placement.y ||
+                params.width != placement.width ||
                 params.height != placement.height
             ) {
                 params.gravity = placement.gravity
                 params.x = placement.x
                 params.y = placement.y
+                params.width = placement.width
                 params.height = placement.height
                 try {
                     windowManager.updateViewLayout(container, params)
@@ -266,16 +323,20 @@ class WidgetLeafTopBarService : AccessibilityService() {
                 }
             }
         } else {
-            // Fallback placement when status bar accessibility node bounds are not yet reported
-            val screenW = resources.displayMetrics.widthPixels
+            val metrics = windowManager.currentWindowMetrics
+            val screenW = metrics.bounds.width()
+            val insetTop = metrics.windowInsets
+                .getInsetsIgnoringVisibility(WindowInsets.Type.statusBars())
+                .top
+            val barH = if (insetTop > 0) insetTop else (36 * density).toInt()
             val fallbackFree = Rect(
                 (screenW * 0.12f).toInt(),
                 0,
-                (screenW * 0.78f).toInt(),
-                (36 * density).toInt()
+                (screenW * 0.82f).toInt(),
+                barH
             )
             val placement = StatusBarSpaceScanner.computeCoexistingPlacement(
-                barBounds = Rect(0, 0, screenW, (36 * density).toInt()),
+                barBounds = Rect(0, 0, screenW, barH),
                 freeSpace = fallbackFree,
                 otherTopBarOverlays = emptyList(),
                 position = currentSettings.topBarPosition,
@@ -287,6 +348,7 @@ class WidgetLeafTopBarService : AccessibilityService() {
             params.gravity = placement.gravity
             params.x = placement.x
             params.y = placement.y
+            params.width = placement.width
             params.height = placement.height
             try {
                 windowManager.updateViewLayout(container, params)
@@ -300,12 +362,14 @@ class WidgetLeafTopBarService : AccessibilityService() {
         val view = stripContainer
         if (isWindowAttached && view != null) {
             try {
-                windowManager.removeView(view)
+                windowManager.removeViewImmediate(view)
             } catch (_: Throwable) {
                 // Ignored
             }
         }
         stripContainer = null
+        hoverPillBg = null
+        iconView = null
         layoutParams = null
         isWindowAttached = false
     }
@@ -318,6 +382,17 @@ class WidgetLeafTopBarService : AccessibilityService() {
         fun isServiceEnabled(context: Context): Boolean {
             if (instance != null) return true
             val expectedComponent = ComponentName(context, WidgetLeafTopBarService::class.java)
+            val am = context.getSystemService(AccessibilityManager::class.java)
+            val enabledInManager = runCatching {
+                am?.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+                    ?.any {
+                        val s = it.resolveInfo.serviceInfo
+                        s.packageName == expectedComponent.packageName &&
+                            s.name == expectedComponent.className
+                    } == true
+            }.getOrDefault(false)
+            if (enabledInManager) return true
+
             val enabledServices = try {
                 Settings.Secure.getString(
                     context.contentResolver,
@@ -334,8 +409,14 @@ class WidgetLeafTopBarService : AccessibilityService() {
 
         fun openAccessibilitySettings(context: Context) {
             try {
+                val cn = ComponentName(context, WidgetLeafTopBarService::class.java).flattenToString()
                 val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    putExtra(":settings:fragment_args_key", cn)
+                    putExtra(
+                        ":settings:show_fragment_args",
+                        Bundle().apply { putString(":settings:fragment_args_key", cn) }
+                    )
                 }
                 context.startActivity(intent)
             } catch (_: Throwable) {

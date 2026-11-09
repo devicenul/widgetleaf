@@ -2,10 +2,12 @@
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowsChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagRequestFilterKeyEvents"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews|flagRequestFilterKeyEvents"
     android:canPerformGestures="false"
     android:canRequestFilterKeyEvents="true"
     android:canRetrieveWindowContent="true"
     android:description="@string/top_bar_service_description"
-    android:notificationTimeout="100"
-    android:settingsActivity="io.devnullapps.widgetleaf.ui.WidgetDeckActivity" />
+    android:isAccessibilityTool="false"
+    android:notificationTimeout="0"
+    android:settingsActivity="io.devnullapps.widgetleaf.ui.WidgetDeckActivity"
+    android:summary="@string/top_bar_service_summary" />

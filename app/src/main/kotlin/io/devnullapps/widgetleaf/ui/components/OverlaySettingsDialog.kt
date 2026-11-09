@@ -45,6 +45,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -54,6 +55,7 @@ import io.devnullapps.widgetleaf.domain.model.OverlaySettings
 import io.devnullapps.widgetleaf.domain.model.TopBarPosition
 import io.devnullapps.widgetleaf.services.WidgetLeafTopBarService
 import io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme
+import kotlinx.coroutines.delay
 
 @Composable
 fun OverlaySettingsDialog(
@@ -66,11 +68,19 @@ fun OverlaySettingsDialog(
     if (!isOpen) return
 
     val context = LocalContext.current
+    val windowInfo = LocalWindowInfo.current
     val scrollState = rememberScrollState()
     var isRecordingHotkey by remember { mutableStateOf(false) }
     val hotkeyFocusRequester = remember { FocusRequester() }
-    val isTopBarServiceActive = remember(settings.pinToTopBar, isOpen) {
-        WidgetLeafTopBarService.isServiceEnabled(context)
+    var isTopBarServiceActive by remember(settings.pinToTopBar, isOpen, windowInfo.isWindowFocused) {
+        mutableStateOf(WidgetLeafTopBarService.isServiceEnabled(context))
+    }
+
+    LaunchedEffect(isOpen, settings.pinToTopBar) {
+        while (isOpen && settings.pinToTopBar && !isTopBarServiceActive) {
+            delay(1000L)
+            isTopBarServiceActive = WidgetLeafTopBarService.isServiceEnabled(context)
+        }
     }
 
     LaunchedEffect(isRecordingHotkey) {
@@ -520,14 +530,14 @@ fun OverlaySettingsDialog(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = "Enable Top Bar & Hotkey Service",
+                                        text = "Enable Top Bar Service",
                                         color = WidgetLeafTheme.palette.textPrimary,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = "Turn on 'WidgetLeaf Top Bar & Hotkey' in Accessibility Settings to draw the clickable icon in the desktop top bar.",
+                                        text = "Turn on 'Use WidgetLeaf Top Bar' in Accessibility Settings (keep 'WidgetLeaf Top Bar shortcut' off so no floating side button appears).",
                                         color = WidgetLeafTheme.palette.textSecondary,
                                         fontSize = 11.sp
                                     )
