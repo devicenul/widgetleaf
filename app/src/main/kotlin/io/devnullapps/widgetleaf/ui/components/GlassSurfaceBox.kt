@@ -1,8 +1,12 @@
 package io.devnullapps.widgetleaf.ui.components
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,14 +14,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -31,12 +32,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.devnullapps.widgetleaf.domain.model.DesktopGridProfile
@@ -97,12 +100,26 @@ fun GlassHudSurface(
     )
 }
 
+@Composable
+internal fun rememberSystemPointerIcon(context: Context, type: Int, fallback: PointerIcon = PointerIcon.Default): PointerIcon {
+    return remember(context, type) {
+        try {
+            val sysIcon = android.view.PointerIcon.getSystemIcon(context, type)
+            if (sysIcon != null) PointerIcon(sysIcon) else fallback
+        } catch (_: Throwable) {
+            fallback
+        }
+    }
+}
+
 /**
  * Frame rendered ONLY when a widget is in EDIT_MODE.
  * Draws:
- * - 1.5.dp leafPrimary (#10B981) border
- * - 4-edge leafBright (#34D399) drag handles that snap to grid cells
- * - Compact floating glassmorphic action pill with Reconfigure and Remove actions
+ * - Subtle dark edit scrim and 2.dp leafPrimary (#10B981) border
+ * - 4-edge leafBright (#34D399) drag handles with generous grab hitboxes (88x28dp / 28x88dp)
+ *   and native resize pointer cursors (↕ / ↔)
+ * - Centered floating glassmorphic action pill inside the widget bounds (so it never overlaps
+ *   the top status bar or edge resize handles) with large hitboxes for Reconfigure and Remove
  */
 @Composable
 fun WidgetEditResizeFrame(
@@ -116,71 +133,115 @@ fun WidgetEditResizeFrame(
 ) {
     if (!isEditing) return
 
+    val context = LocalContext.current
     val density = LocalDensity.current
     val cellStepXPx = with(density) { (gridProfile.cellWidthDp + gridProfile.gutterDp).dp.toPx() }
     val cellStepYPx = with(density) { (gridProfile.cellHeightDp + gridProfile.gutterDp).dp.toPx() }
+
+    val verticalResizeIcon = rememberSystemPointerIcon(
+        context,
+        android.view.PointerIcon.TYPE_VERTICAL_DOUBLE_ARROW,
+        PointerIcon.Hand
+    )
+    val horizontalResizeIcon = rememberSystemPointerIcon(
+        context,
+        android.view.PointerIcon.TYPE_HORIZONTAL_DOUBLE_ARROW,
+        PointerIcon.Hand
+    )
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .testTag("widget_edit_frame_${widget.appWidgetId}")
-            .border(1.5.dp, WidgetLeafTheme.palette.leafPrimary, RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0x400D1117))
+            .border(2.dp, WidgetLeafTheme.palette.leafPrimary, RoundedCornerShape(16.dp))
     ) {
-        // Floating action pill
+        // Centered floating action pill (100% inside widget hit bounds, never overlaps top bar or edge handles)
         GlassHudSurface(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset { IntOffset(0, -with(density) { 42.dp.roundToPx() }) }
-                .height(34.dp)
-                .padding(horizontal = 4.dp),
-            shape = RoundedCornerShape(17.dp)
+                .align(Alignment.Center)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = { /* Consume stray clicks on the pill frame */ }
+                ),
+            shape = RoundedCornerShape(22.dp),
+            backgroundColor = Color(0xF2161B22),
+            borderColor = WidgetLeafTheme.palette.leafPrimary.copy(alpha = 0.7f),
+            borderWidth = 1.dp,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
         ) {
             Row(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(horizontal = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.align(Alignment.Center),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (widget.isReconfigurable) {
-                    TextButton(
-                        onClick = { onReconfigureWidget?.invoke(widget.appWidgetId) },
-                        modifier = Modifier.testTag("widget_reconfigure_${widget.appWidgetId}")
+                    Box(
+                        modifier = Modifier
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(WidgetLeafTheme.palette.leafPrimary.copy(alpha = 0.22f))
+                            .border(
+                                0.5.dp,
+                                WidgetLeafTheme.palette.leafPrimary.copy(alpha = 0.6f),
+                                RoundedCornerShape(14.dp)
+                            )
+                            .pointerHoverIcon(PointerIcon.Hand)
+                            .testTag("widget_reconfigure_${widget.appWidgetId}")
+                            .clickable {
+                                onReconfigureWidget?.invoke(widget.appWidgetId)
+                            }
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = "Reconfigure",
                             color = WidgetLeafTheme.palette.leafBright,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
-                    Spacer(modifier = Modifier.width(4.dp))
                 }
 
-                TextButton(
-                    onClick = { onRemoveWidget(widget.appWidgetId) },
-                    modifier = Modifier.testTag("widget_remove_${widget.appWidgetId}")
+                Box(
+                    modifier = Modifier
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(DangerCoral.copy(alpha = 0.20f))
+                        .border(
+                            0.5.dp,
+                            DangerCoral.copy(alpha = 0.65f),
+                            RoundedCornerShape(14.dp)
+                        )
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .testTag("widget_remove_${widget.appWidgetId}")
+                        .clickable {
+                            onRemoveWidget(widget.appWidgetId)
+                        }
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Remove",
                         color = DangerCoral,
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
             }
         }
 
-        // Top drag handle
+        // Top drag handle (88x28dp grab zone with ↕ resize cursor)
         var topDragY by remember { mutableFloatStateOf(0f) }
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .size(width = 36.dp, height = 8.dp)
-                .offset(y = (-4).dp)
+                .size(width = 88.dp, height = 28.dp)
+                .pointerHoverIcon(verticalResizeIcon)
                 .testTag("resize_handle_top_${widget.appWidgetId}")
-                .clip(RoundedCornerShape(4.dp))
-                .background(WidgetLeafTheme.palette.leafBright)
-                .pointerInput(widget.appWidgetId) {
+                .pointerInput(widget.appWidgetId, widget.cellY, widget.spanY) {
                     detectDragGestures(
                         onDragStart = { topDragY = 0f },
                         onDrag = { change, dragAmount ->
@@ -189,26 +250,40 @@ fun WidgetEditResizeFrame(
                         },
                         onDragEnd = {
                             val cellDelta = (topDragY / cellStepYPx).roundToInt()
-                            val newCellY = (widget.cellY + cellDelta).coerceIn(0, widget.cellY + widget.spanY - widget.minSpanY)
-                            val newSpanY = (widget.spanY - (newCellY - widget.cellY)).coerceIn(widget.minSpanY, widget.maxSpanY)
+                            val newCellY = (widget.cellY + cellDelta).coerceIn(
+                                0,
+                                (widget.cellY + widget.spanY - widget.minSpanY).coerceAtLeast(0)
+                            )
+                            val newSpanY = (widget.spanY - (newCellY - widget.cellY)).coerceIn(
+                                widget.minSpanY,
+                                widget.maxSpanY
+                            )
                             onResizeWidget(widget.cellX, newCellY, widget.spanX, newSpanY)
                             topDragY = 0f
                         }
                     )
-                }
-        )
+                },
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(top = 3.dp)
+                    .size(width = 48.dp, height = 8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(WidgetLeafTheme.palette.leafBright)
+                    .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(4.dp))
+            )
+        }
 
-        // Bottom drag handle
+        // Bottom drag handle (88x28dp grab zone with ↕ resize cursor)
         var bottomDragY by remember { mutableFloatStateOf(0f) }
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .size(width = 36.dp, height = 8.dp)
-                .offset(y = 4.dp)
+                .size(width = 88.dp, height = 28.dp)
+                .pointerHoverIcon(verticalResizeIcon)
                 .testTag("resize_handle_bottom_${widget.appWidgetId}")
-                .clip(RoundedCornerShape(4.dp))
-                .background(WidgetLeafTheme.palette.leafBright)
-                .pointerInput(widget.appWidgetId) {
+                .pointerInput(widget.appWidgetId, widget.cellY, widget.spanY) {
                     detectDragGestures(
                         onDragStart = { bottomDragY = 0f },
                         onDrag = { change, dragAmount ->
@@ -217,25 +292,36 @@ fun WidgetEditResizeFrame(
                         },
                         onDragEnd = {
                             val cellDelta = (bottomDragY / cellStepYPx).roundToInt()
-                            val newSpanY = (widget.spanY + cellDelta).coerceIn(widget.minSpanY, widget.maxSpanY)
+                            val newSpanY = (widget.spanY + cellDelta).coerceIn(
+                                widget.minSpanY,
+                                widget.maxSpanY
+                            )
                             onResizeWidget(widget.cellX, widget.cellY, widget.spanX, newSpanY)
                             bottomDragY = 0f
                         }
                     )
-                }
-        )
+                },
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(bottom = 3.dp)
+                    .size(width = 48.dp, height = 8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(WidgetLeafTheme.palette.leafBright)
+                    .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(4.dp))
+            )
+        }
 
-        // Left drag handle
+        // Left drag handle (28x88dp grab zone with ↔ resize cursor)
         var leftDragX by remember { mutableFloatStateOf(0f) }
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .size(width = 8.dp, height = 36.dp)
-                .offset(x = (-4).dp)
+                .size(width = 28.dp, height = 88.dp)
+                .pointerHoverIcon(horizontalResizeIcon)
                 .testTag("resize_handle_left_${widget.appWidgetId}")
-                .clip(RoundedCornerShape(4.dp))
-                .background(WidgetLeafTheme.palette.leafBright)
-                .pointerInput(widget.appWidgetId) {
+                .pointerInput(widget.appWidgetId, widget.cellX, widget.spanX) {
                     detectDragGestures(
                         onDragStart = { leftDragX = 0f },
                         onDrag = { change, dragAmount ->
@@ -244,26 +330,40 @@ fun WidgetEditResizeFrame(
                         },
                         onDragEnd = {
                             val cellDelta = (leftDragX / cellStepXPx).roundToInt()
-                            val newCellX = (widget.cellX + cellDelta).coerceIn(0, widget.cellX + widget.spanX - widget.minSpanX)
-                            val newSpanX = (widget.spanX - (newCellX - widget.cellX)).coerceIn(widget.minSpanX, widget.maxSpanX)
+                            val newCellX = (widget.cellX + cellDelta).coerceIn(
+                                0,
+                                (widget.cellX + widget.spanX - widget.minSpanX).coerceAtLeast(0)
+                            )
+                            val newSpanX = (widget.spanX - (newCellX - widget.cellX)).coerceIn(
+                                widget.minSpanX,
+                                widget.maxSpanX
+                            )
                             onResizeWidget(newCellX, widget.cellY, newSpanX, widget.spanY)
                             leftDragX = 0f
                         }
                     )
-                }
-        )
+                },
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(start = 3.dp)
+                    .size(width = 8.dp, height = 48.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(WidgetLeafTheme.palette.leafBright)
+                    .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(4.dp))
+            )
+        }
 
-        // Right drag handle
+        // Right drag handle (28x88dp grab zone with ↔ resize cursor)
         var rightDragX by remember { mutableFloatStateOf(0f) }
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .size(width = 8.dp, height = 36.dp)
-                .offset(x = 4.dp)
+                .size(width = 28.dp, height = 88.dp)
+                .pointerHoverIcon(horizontalResizeIcon)
                 .testTag("resize_handle_right_${widget.appWidgetId}")
-                .clip(RoundedCornerShape(4.dp))
-                .background(WidgetLeafTheme.palette.leafBright)
-                .pointerInput(widget.appWidgetId) {
+                .pointerInput(widget.appWidgetId, widget.cellX, widget.spanX) {
                     detectDragGestures(
                         onDragStart = { rightDragX = 0f },
                         onDrag = { change, dragAmount ->
@@ -272,12 +372,25 @@ fun WidgetEditResizeFrame(
                         },
                         onDragEnd = {
                             val cellDelta = (rightDragX / cellStepXPx).roundToInt()
-                            val newSpanX = (widget.spanX + cellDelta).coerceIn(widget.minSpanX, widget.maxSpanX)
+                            val newSpanX = (widget.spanX + cellDelta).coerceIn(
+                                widget.minSpanX,
+                                widget.maxSpanX
+                            )
                             onResizeWidget(widget.cellX, widget.cellY, newSpanX, widget.spanY)
                             rightDragX = 0f
                         }
                     )
-                }
-        )
+                },
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(end = 3.dp)
+                    .size(width = 8.dp, height = 48.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(WidgetLeafTheme.palette.leafBright)
+                    .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(4.dp))
+            )
+        }
     }
 }

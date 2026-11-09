@@ -129,6 +129,7 @@ fun WidgetDeckOverlayScreen(
     WidgetLeafTheme(useDynamicColor = uiState.settings.useDynamicColor) {
         val palette = WidgetLeafTheme.palette
         var lastContextMenuOpenUptimeMs by remember { mutableLongStateOf(-10_000L) }
+        var lastWidgetMutationUptimeMs by remember { mutableLongStateOf(-10_000L) }
 
         Box(
             modifier = modifier
@@ -220,15 +221,37 @@ fun WidgetDeckOverlayScreen(
                     showEmptyCanvasHint = showEmptyHint,
                     editingWidgetId = uiState.editingWidgetId,
                     useCenteredBentoCanvas = uiState.settings.useCenteredBentoCanvas,
-                    onEnterEditMode = onEnterEditMode,
-                    onMoveWidget = onMoveWidget,
-                    onResizeWidget = onResizeWidget,
-                    onDragAcrossEdge = onDragAcrossEdge,
-                    onRemoveWidget = onRemoveWidget,
-                    onReconfigureWidget = onReconfigureWidget,
+                    onEnterEditMode = { id ->
+                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                        onEnterEditMode(id)
+                    },
+                    onMoveWidget = { id, x, y ->
+                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                        onMoveWidget(id, x, y)
+                    },
+                    onResizeWidget = { id, x, y, sx, sy ->
+                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                        onResizeWidget(id, x, y, sx, sy)
+                    },
+                    onDragAcrossEdge = { id, dir, x, y ->
+                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                        onDragAcrossEdge(id, dir, x, y)
+                    },
+                    onRemoveWidget = { id ->
+                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                        onRemoveWidget(id)
+                    },
+                    onReconfigureWidget = onReconfigureWidget?.let { callback ->
+                        { id ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            callback(id)
+                        }
+                    },
                     onEmptyCanvasClick = {
-                        val sinceContextOpenMs = SystemClock.uptimeMillis() - lastContextMenuOpenUptimeMs
-                        if (sinceContextOpenMs >= 450L) {
+                        val now = SystemClock.uptimeMillis()
+                        val sinceContextOpenMs = now - lastContextMenuOpenUptimeMs
+                        val sinceWidgetMutationMs = now - lastWidgetMutationUptimeMs
+                        if (sinceContextOpenMs >= 450L && sinceWidgetMutationMs >= 350L) {
                             when {
                                 uiState.contextMenuPosition != null -> onCloseContextMenu()
                                 uiState.editingWidgetId != null -> onExitEditMode()

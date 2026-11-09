@@ -445,11 +445,20 @@ class DeckViewModel(
     // --- Widget Edit, Move, Resize, Edge-Drag & Remove ---
 
     fun enterWidgetEditMode(appWidgetId: Int) {
-        _uiState.update { it.copy(editingWidgetId = appWidgetId) }
+        _uiState.update {
+            it.copy(
+                editingWidgetId = appWidgetId,
+                contextMenuPosition = null
+            )
+        }
     }
 
     fun exitWidgetEditMode() {
         _uiState.update { it.copy(editingWidgetId = null) }
+    }
+
+    fun markLaunchingInternalFlow(launching: Boolean) {
+        _uiState.update { it.copy(isLaunchingInternalFlow = launching) }
     }
 
     fun moveOrResizeWidget(
@@ -605,7 +614,16 @@ class DeckViewModel(
     // --- Context Menu, Settings & Picker UI Actions ---
 
     fun openContextMenu(position: Pair<Float, Float>) {
-        _uiState.update { it.copy(contextMenuPosition = position) }
+        _uiState.update { current ->
+            if (current.editingWidgetId != null ||
+                current.isWidgetPickerOpen ||
+                current.isOverlaySettingsOpen
+            ) {
+                current
+            } else {
+                current.copy(contextMenuPosition = position)
+            }
+        }
     }
 
     fun closeContextMenu() {

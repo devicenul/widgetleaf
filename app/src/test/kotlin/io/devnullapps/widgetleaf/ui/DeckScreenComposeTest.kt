@@ -429,14 +429,18 @@ class DeckScreenComposeTest {
 
         var removedWidgetId = -1
         var reconfiguredWidgetId = -1
+        var overlayDismissed = false
 
         composeTestRule.setContent {
+            var currentWidgets by remember { mutableStateOf(listOf(widget)) }
+            var currentEditingId by remember { mutableStateOf<Int?>(101) }
+
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
-                    widgets = listOf(widget),
-                    editingWidgetId = 101
+                    widgets = currentWidgets,
+                    editingWidgetId = currentEditingId
                 ),
-                onDismissOverlay = {},
+                onDismissOverlay = { overlayDismissed = true },
                 onSelectPage = {},
                 onPreviousPage = {},
                 onNextPage = {},
@@ -449,7 +453,11 @@ class DeckScreenComposeTest {
                 onUpdateSettings = {},
                 onStartEditPageLabel = {},
                 onCommitPageLabel = { _, _ -> },
-                onRemoveWidget = { removedWidgetId = it },
+                onRemoveWidget = {
+                    removedWidgetId = it
+                    currentWidgets = emptyList()
+                    currentEditingId = null
+                },
                 onReconfigureWidget = { reconfiguredWidgetId = it }
             )
         }
@@ -473,11 +481,14 @@ class DeckScreenComposeTest {
         composeTestRule.onNodeWithTag("widget_reconfigure_101").assertIsDisplayed()
         composeTestRule.onNodeWithTag("widget_remove_101").assertIsDisplayed()
 
-        composeTestRule.onNodeWithTag("widget_remove_101").performClick()
-        assertThat(removedWidgetId).isEqualTo(101)
-
         composeTestRule.onNodeWithTag("widget_reconfigure_101").performClick()
         assertThat(reconfiguredWidgetId).isEqualTo(101)
+        assertThat(overlayDismissed).isFalse()
+
+        composeTestRule.onNodeWithTag("widget_remove_101").performClick()
+        composeTestRule.waitForIdle()
+        assertThat(removedWidgetId).isEqualTo(101)
+        assertThat(overlayDismissed).isFalse()
     }
 
     @Test

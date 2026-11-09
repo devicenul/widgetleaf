@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -30,12 +31,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.devnullapps.widgetleaf.domain.model.DesktopGridProfile
@@ -86,8 +93,49 @@ fun WidgetGridPage(
     modifier: Modifier = Modifier,
     widgetContent: @Composable (PlacedWidget) -> Unit = { DefaultFramelessWidgetContent(it) }
 ) {
+    val context = LocalContext.current
     val density = LocalDensity.current
     var lastContextMenuOpenTimeMs by remember { mutableLongStateOf(-10_000L) }
+    var lastWidgetActionTimeMs by remember { mutableLongStateOf(-10_000L) }
+    var gridOffsetInRoot by remember { mutableFloatStateOf(0f) }
+
+    val currentWidgets by rememberUpdatedState(widgets)
+    val currentEditingWidgetId by rememberUpdatedState(editingWidgetId)
+    val currentGridProfile by rememberUpdatedState(gridProfile)
+    val currentOnEnterEditMode by rememberUpdatedState(onEnterEditMode)
+    val currentOnEmptyCanvasClick by rememberUpdatedState(onEmptyCanvasClick)
+    val currentOnOpenContextMenu by rememberUpdatedState(onOpenContextMenu)
+
+    val movePointerIcon = rememberSystemPointerIcon(
+        context,
+        android.view.PointerIcon.TYPE_ALL_SCROLL,
+        PointerIcon.Hand
+    )
+
+    fun findWidgetAtPosition(pos: Offset): PlacedWidget? {
+        val profile = currentGridProfile
+        val localX = pos.x - gridOffsetInRoot
+        val localY = pos.y
+        return currentWidgets.firstOrNull { w ->
+            val leftPx = with(density) {
+                (profile.marginDp + w.cellX * (profile.cellWidthDp + profile.gutterDp)).dp.toPx()
+            }
+            val topPx = with(density) {
+                (profile.marginDp + w.cellY * (profile.cellHeightDp + profile.gutterDp)).dp.toPx()
+            }
+            val widthPx = with(density) { profile.widthDpForSpan(w.spanX).dp.toPx() }
+            val heightPx = with(density) { profile.heightDpForSpan(w.spanY).dp.toPx() }
+            val padPx = if (currentEditingWidgetId == w.appWidgetId) {
+                with(density) { 16.dp.toPx() }
+            } else {
+                0f
+            }
+            localX >= (leftPx - padPx) &&
+                localX <= (leftPx + widthPx + padPx) &&
+                localY >= (topPx - padPx) &&
+                localY <= (topPx + heightPx + padPx)
+        }
+    }
 
     Box(
         modifier = modifier
@@ -95,15 +143,23 @@ fun WidgetGridPage(
             .pointerInput(Unit) {
                 awaitEachGesture {
                     var firstDownPos: Offset? = null
+                    var hitWidgetOnDown: PlacedWidget? = null
                     var isSecondaryOrTwoFinger = false
-                    var contextMenuTriggered = false
+                    var contextMenuOrEditTriggered = false
+                    var consumedByChild = false
                     var movedBeyondSlop = false
                     val touchSlop = viewConfiguration.touchSlop
                     val longPressTimeoutMs = viewConfiguration.longPressTimeoutMillis
                     var downTimeMs = 0L
 
                     while (true) {
-                        val timeoutRemaining = if (firstDownPos != null && !isSecondaryOrTwoFinger && !contextMenuTriggered && !movedBeyondSlop) {
+                        val timeoutRemaining = if (
+                            firstDownPos != null &&
+                            !isSecondaryOrTwoFinger &&
+                            !contextMenuOrEditTriggered &&
+                            !consumedByChild &&
+                            !movedBeyondSlop
+                        ) {
                             (longPressTimeoutMs - (SystemClock.uptimeMillis() - downTimeMs)).coerceAtLeast(1L)
                         } else {
                             null
@@ -120,13 +176,22 @@ fun WidgetGridPage(
                         if (event == null) {
                             // Long-press timeout reached while finger still down
                             val pos = firstDownPos ?: Offset.Zero
-                            contextMenuTriggered = true
-                            lastContextMenuOpenTimeMs = SystemClock.uptimeMillis()
-                            onOpenContextMenu(Pair(pos.x, pos.y))
+                            contextMenuOrEditTriggered = true
+                            val targetWidget = hitWidgetOnDown ?: findWidgetAtPosition(pos)
+                            if (targetWidget != null) {
+                                lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                currentOnEnterEditMode(targetWidget.appWidgetId)
+                            } else if (currentEditingWidgetId == null) {
+                                lastContextMenuOpenTimeMs = SystemClock.uptimeMillis()
+                                currentOnOpenContextMenu(Pair(pos.x, pos.y))
+                            }
                             continue
                         }
 
-                        // Ignore non-press events before a gesture has started (e.g. mouse hover/move)
+                        if (event.changes.any { it.isConsumed }) {
+                            consumedByChild = true
+                        }
+
                         val anyPressed = event.changes.any { it.pressed }
                         val anyPreviouslyPressed = event.changes.any { it.previousPressed }
                         if (firstDownPos == null && !anyPressed && !event.buttons.isSecondaryPressed) {
@@ -134,8 +199,17 @@ fun WidgetGridPage(
                         }
 
                         if (firstDownPos == null) {
-                            firstDownPos = event.changes.firstOrNull()?.position ?: Offset.Zero
+                            val downPos = event.changes.firstOrNull()?.position ?: Offset.Zero
+                            firstDownPos = downPos
                             downTimeMs = SystemClock.uptimeMillis()
+                            hitWidgetOnDown = findWidgetAtPosition(downPos)
+                        }
+
+                        if (consumedByChild) {
+                            if (!anyPressed) {
+                                break
+                            }
+                            continue
                         }
 
                         val pressedCount = event.changes.count { it.pressed }
@@ -144,15 +218,21 @@ fun WidgetGridPage(
                             pressedCount >= 2
                         ) {
                             isSecondaryOrTwoFinger = true
-                            if (!contextMenuTriggered) {
+                            if (!contextMenuOrEditTriggered) {
                                 val pos = firstDownPos ?: event.changes.firstOrNull()?.position ?: Offset.Zero
-                                contextMenuTriggered = true
-                                lastContextMenuOpenTimeMs = SystemClock.uptimeMillis()
-                                onOpenContextMenu(Pair(pos.x, pos.y))
+                                contextMenuOrEditTriggered = true
+                                val targetWidget = hitWidgetOnDown ?: findWidgetAtPosition(pos)
+                                if (targetWidget != null) {
+                                    lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                    currentOnEnterEditMode(targetWidget.appWidgetId)
+                                } else if (currentEditingWidgetId == null) {
+                                    lastContextMenuOpenTimeMs = SystemClock.uptimeMillis()
+                                    currentOnOpenContextMenu(Pair(pos.x, pos.y))
+                                }
                             }
                         }
 
-                        if (isSecondaryOrTwoFinger || contextMenuTriggered) {
+                        if (isSecondaryOrTwoFinger || contextMenuOrEditTriggered) {
                             event.changes.forEach { it.consume() }
                             if (!anyPressed) {
                                 break
@@ -167,9 +247,16 @@ fun WidgetGridPage(
 
                         if (!anyPressed && anyPreviouslyPressed) {
                             event.changes.forEach { it.consume() }
-                            val sinceContextMs = SystemClock.uptimeMillis() - lastContextMenuOpenTimeMs
-                            if (!movedBeyondSlop && sinceContextMs > 400L) {
-                                onEmptyCanvasClick()
+                            val now = SystemClock.uptimeMillis()
+                            val sinceContextMs = now - lastContextMenuOpenTimeMs
+                            val sinceWidgetActionMs = now - lastWidgetActionTimeMs
+                            if (!movedBeyondSlop &&
+                                !consumedByChild &&
+                                hitWidgetOnDown == null &&
+                                sinceContextMs > 400L &&
+                                sinceWidgetActionMs > 350L
+                            ) {
+                                currentOnEmptyCanvasClick()
                             }
                             break
                         }
@@ -208,6 +295,9 @@ fun WidgetGridPage(
                         Modifier
                     }
                 )
+                .onGloballyPositioned { coords ->
+                    gridOffsetInRoot = coords.positionInRoot().x
+                }
         ) {
             val cellStepXPx = with(density) { (gridProfile.cellWidthDp + gridProfile.gutterDp).dp.toPx() }
             val cellStepYPx = with(density) { (gridProfile.cellHeightDp + gridProfile.gutterDp).dp.toPx() }
@@ -233,54 +323,70 @@ fun WidgetGridPage(
                     )
                 }
 
-                var moveDragX by remember { mutableFloatStateOf(0f) }
-                var moveDragY by remember { mutableFloatStateOf(0f) }
+                var moveDragX by remember(widget.appWidgetId, widget.cellX, widget.cellY) {
+                    mutableFloatStateOf(0f)
+                }
+                var moveDragY by remember(widget.appWidgetId, widget.cellX, widget.cellY) {
+                    mutableFloatStateOf(0f)
+                }
 
                 Box(
                     modifier = Modifier
                         .offset(x = leftDp, y = topDp)
+                        .offset {
+                            if (isEditing) {
+                                IntOffset(moveDragX.roundToInt(), moveDragY.roundToInt())
+                            } else {
+                                IntOffset.Zero
+                            }
+                        }
                         .size(width = widthDp, height = heightDp)
                         .alpha(animatedAlpha.value)
                         .testTag("placed_widget_${widget.appWidgetId}")
                         .then(
                             if (isEditing) {
-                                Modifier.pointerInput(widget.appWidgetId) {
-                                    detectDragGestures(
-                                        onDragStart = {
-                                            moveDragX = 0f
-                                            moveDragY = 0f
-                                        },
-                                        onDrag = { change, dragAmount ->
-                                            change.consume()
-                                            moveDragX += dragAmount.x
-                                            moveDragY += dragAmount.y
-                                        },
-                                        onDragEnd = {
-                                            val cellDeltaX = (moveDragX / cellStepXPx).roundToInt()
-                                            val cellDeltaY = (moveDragY / cellStepYPx).roundToInt()
-                                            val targetCellX = (widget.cellX + cellDeltaX).coerceIn(0, gridProfile.columns - widget.spanX)
-                                            val targetCellY = (widget.cellY + cellDeltaY).coerceIn(0, gridProfile.rows - widget.spanY)
+                                Modifier
+                                    .pointerHoverIcon(movePointerIcon)
+                                    .pointerInput(widget.appWidgetId, widget.cellX, widget.cellY, widget.spanX, widget.spanY) {
+                                        detectDragGestures(
+                                            onDragStart = {
+                                                lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                                moveDragX = 0f
+                                                moveDragY = 0f
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                                moveDragX += dragAmount.x
+                                                moveDragY += dragAmount.y
+                                            },
+                                            onDragEnd = {
+                                                lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                                val cellDeltaX = (moveDragX / cellStepXPx).roundToInt()
+                                                val cellDeltaY = (moveDragY / cellStepYPx).roundToInt()
+                                                val targetCellX = (widget.cellX + cellDeltaX).coerceIn(0, gridProfile.columns - widget.spanX)
+                                                val targetCellY = (widget.cellY + cellDeltaY).coerceIn(0, gridProfile.rows - widget.spanY)
 
-                                            // Check edge drag thresholds (dragged past screen edges)
-                                            val currentLeftPx = with(density) { leftDp.toPx() } + moveDragX
-                                            val currentRightPx = currentLeftPx + with(density) { widthDp.toPx() }
-                                            val screenWidthPx = with(density) { gridProfile.availableWidthDp.dp.toPx() }
-                                            val edgeThresholdPx = with(density) { 48.dp.toPx() }
+                                                // Check edge drag thresholds (dragged past screen edges)
+                                                val currentLeftPx = with(density) { leftDp.toPx() } + moveDragX
+                                                val currentRightPx = currentLeftPx + with(density) { widthDp.toPx() }
+                                                val screenWidthPx = with(density) { gridProfile.availableWidthDp.dp.toPx() }
+                                                val edgeThresholdPx = with(density) { 48.dp.toPx() }
 
-                                            if (currentLeftPx < edgeThresholdPx) {
-                                                val landingX = (gridProfile.columns - widget.spanX).coerceAtLeast(0)
-                                                onDragAcrossEdge(widget.appWidgetId, EdgeDirection.LEFT, landingX, targetCellY)
-                                            } else if (currentRightPx > screenWidthPx - edgeThresholdPx) {
-                                                onDragAcrossEdge(widget.appWidgetId, EdgeDirection.RIGHT, 0, targetCellY)
-                                            } else {
-                                                onMoveWidget(widget.appWidgetId, targetCellX, targetCellY)
+                                                if (currentLeftPx < edgeThresholdPx) {
+                                                    val landingX = (gridProfile.columns - widget.spanX).coerceAtLeast(0)
+                                                    onDragAcrossEdge(widget.appWidgetId, EdgeDirection.LEFT, landingX, targetCellY)
+                                                } else if (currentRightPx > screenWidthPx - edgeThresholdPx) {
+                                                    onDragAcrossEdge(widget.appWidgetId, EdgeDirection.RIGHT, 0, targetCellY)
+                                                } else {
+                                                    onMoveWidget(widget.appWidgetId, targetCellX, targetCellY)
+                                                }
+
+                                                moveDragX = 0f
+                                                moveDragY = 0f
                                             }
-
-                                            moveDragX = 0f
-                                            moveDragY = 0f
-                                        }
-                                    )
-                                }
+                                        )
+                                    }
                             } else {
                                 Modifier
                                     .pointerInput(widget.appWidgetId) {
@@ -294,6 +400,7 @@ fun WidgetGridPage(
                                                         pressedCount >= 2)
                                                 ) {
                                                     event.changes.forEach { it.consume() }
+                                                    lastWidgetActionTimeMs = SystemClock.uptimeMillis()
                                                     onEnterEditMode(widget.appWidgetId)
                                                     do {
                                                         val next = awaitPointerEvent(PointerEventPass.Initial)
@@ -305,7 +412,10 @@ fun WidgetGridPage(
                                     }
                                     .combinedClickable(
                                         onClick = { /* Interactive widget click handled by host view */ },
-                                        onLongClick = { onEnterEditMode(widget.appWidgetId) }
+                                        onLongClick = {
+                                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                            onEnterEditMode(widget.appWidgetId)
+                                        }
                                     )
                             }
                         )
@@ -319,10 +429,17 @@ fun WidgetGridPage(
                         gridProfile = gridProfile,
                         isEditing = isEditing,
                         onResizeWidget = { newX, newY, newSpanX, newSpanY ->
+                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
                             onResizeWidget(widget.appWidgetId, newX, newY, newSpanX, newSpanY)
                         },
-                        onRemoveWidget = onRemoveWidget,
-                        onReconfigureWidget = onReconfigureWidget
+                        onRemoveWidget = { id ->
+                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                            onRemoveWidget(id)
+                        },
+                        onReconfigureWidget = { id ->
+                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                            onReconfigureWidget?.invoke(id)
+                        }
                     )
                 }
             }

@@ -253,4 +253,80 @@ class WidgetDeckActivityTest {
             controller.pause().stop().destroy()
         }
     }
+
+    @Test
+    fun twoFingerTrackpadSecondaryClick_onPlacedWidget_entersWidgetEditModeWithoutContextMenu() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            val item = WidgetCatalogItem(
+                providerPackage = "io.devnullapps.test",
+                providerClass = "io.devnullapps.test.TestWidget",
+                appName = "TestApp",
+                widgetLabel = "Clock",
+                defaultSpanX = 4,
+                defaultSpanY = 2,
+                resizeMode = PlacedWidget.RESIZE_BOTH
+            )
+            activity.viewModel.addWidgetAutoPlace(item)
+            val placed = activity.viewModel.uiState.value.widgets.first()
+
+            // Secondary click inside the top-left cell (cellX=0, cellY=0) where the widget is placed
+            val now = android.os.SystemClock.uptimeMillis()
+            val props = arrayOf(android.view.MotionEvent.PointerProperties().apply { id = 0 })
+            val coords = arrayOf(android.view.MotionEvent.PointerCoords().apply { x = 80f; y = 80f })
+            val buttonPress = android.view.MotionEvent.obtain(
+                now,
+                now,
+                android.view.MotionEvent.ACTION_BUTTON_PRESS,
+                1,
+                props,
+                coords,
+                0,
+                android.view.MotionEvent.BUTTON_SECONDARY,
+                1f,
+                1f,
+                0,
+                0,
+                android.view.InputDevice.SOURCE_MOUSE,
+                0
+            )
+
+            val consumed = activity.dispatchGenericMotionEvent(buttonPress)
+            buttonPress.recycle()
+
+            assertThat(consumed).isTrue()
+            assertThat(activity.viewModel.uiState.value.editingWidgetId).isEqualTo(placed.appWidgetId)
+            assertThat(activity.viewModel.uiState.value.contextMenuPosition).isNull()
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test
+    fun pressingNonWidgetLeafKeyOnDeckCanvas_dismissesOverlay() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val keysToTest = listOf(
+            KeyEvent.KEYCODE_SPACE,
+            KeyEvent.KEYCODE_A,
+            KeyEvent.KEYCODE_EQUALS
+        )
+
+        for (keyCode in keysToTest) {
+            val intent = Intent(context, WidgetDeckActivity::class.java)
+            val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+            try {
+                val activity = controller.get()
+                assertThat(activity.isFinishing).isFalse()
+
+                activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
+                assertThat(activity.isFinishing).isTrue()
+            } finally {
+                controller.pause().stop().destroy()
+            }
+        }
+    }
 }
