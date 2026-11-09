@@ -205,4 +205,52 @@ class WidgetDeckActivityTest {
             controller.pause().stop().destroy()
         }
     }
+
+    @Test
+    fun twoFingerTrackpadSecondaryClick_opensContextMenuAndDoesNotDismissActivity() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            assertThat(activity.viewModel.uiState.value.contextMenuPosition).isNull()
+
+            val now = android.os.SystemClock.uptimeMillis()
+            val props = arrayOf(android.view.MotionEvent.PointerProperties().apply { id = 0 })
+            val coords = arrayOf(android.view.MotionEvent.PointerCoords().apply { x = 320f; y = 240f })
+            val buttonPress = android.view.MotionEvent.obtain(
+                now,
+                now,
+                android.view.MotionEvent.ACTION_BUTTON_PRESS,
+                1,
+                props,
+                coords,
+                0,
+                android.view.MotionEvent.BUTTON_SECONDARY,
+                1f,
+                1f,
+                0,
+                0,
+                android.view.InputDevice.SOURCE_MOUSE,
+                0
+            )
+
+            val consumed = activity.dispatchGenericMotionEvent(buttonPress)
+            buttonPress.recycle()
+
+            assertThat(consumed).isTrue()
+            assertThat(activity.viewModel.uiState.value.contextMenuPosition).isEqualTo(Pair(320f, 240f))
+            assertThat(activity.isFinishing).isFalse()
+
+            // Even if the OS synthesizes a spurious KEYCODE_BACK right after secondary click,
+            // it must be absorbed within the 600ms debounce window without closing the menu or activity.
+            activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK))
+            activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK))
+            assertThat(activity.viewModel.uiState.value.contextMenuPosition).isEqualTo(Pair(320f, 240f))
+            assertThat(activity.isFinishing).isFalse()
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
 }

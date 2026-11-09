@@ -1,5 +1,6 @@
 package io.devnullapps.widgetleaf.ui.components
 
+import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
@@ -11,20 +12,20 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.devnullapps.widgetleaf.domain.model.OverlaySettings
@@ -127,25 +128,12 @@ fun WidgetDeckOverlayScreen(
 ) {
     WidgetLeafTheme(useDynamicColor = uiState.settings.useDynamicColor) {
         val palette = WidgetLeafTheme.palette
+        var lastContextMenuOpenUptimeMs by remember { mutableLongStateOf(-10_000L) }
 
         Box(
             modifier = modifier
                 .fillMaxSize()
                 .testTag("widget_deck_overlay_root")
-                .pointerInput(
-                    uiState.editingWidgetId,
-                    uiState.isWidgetPickerOpen,
-                    uiState.isOverlaySettingsOpen,
-                    uiState.contextMenuPosition
-                ) {
-                    detectTapGestures {
-                        if (uiState.editingWidgetId != null) {
-                            onExitEditMode()
-                        } else if (!uiState.isWidgetPickerOpen && !uiState.isOverlaySettingsOpen && uiState.contextMenuPosition == null) {
-                            onDismissOverlay()
-                        }
-                    }
-                }
         ) {
             // LAYER 1: Optical Frost Scrim & 2% Procedural Noise Grain
             val effectiveScrimAlpha = uiState.settings.scrimAlpha
@@ -239,13 +227,20 @@ fun WidgetDeckOverlayScreen(
                     onRemoveWidget = onRemoveWidget,
                     onReconfigureWidget = onReconfigureWidget,
                     onEmptyCanvasClick = {
-                        if (uiState.editingWidgetId != null) {
-                            onExitEditMode()
-                        } else {
-                            onDismissOverlay()
+                        val sinceContextOpenMs = SystemClock.uptimeMillis() - lastContextMenuOpenUptimeMs
+                        if (sinceContextOpenMs >= 450L) {
+                            when {
+                                uiState.contextMenuPosition != null -> onCloseContextMenu()
+                                uiState.editingWidgetId != null -> onExitEditMode()
+                                uiState.editingPageLabelIndex != null -> onCancelEditPageLabel()
+                                !uiState.isWidgetPickerOpen && !uiState.isOverlaySettingsOpen -> onDismissOverlay()
+                            }
                         }
                     },
-                    onOpenContextMenu = onOpenContextMenu,
+                    onOpenContextMenu = { pos ->
+                        lastContextMenuOpenUptimeMs = SystemClock.uptimeMillis()
+                        onOpenContextMenu(pos)
+                    },
                     widgetContent = widgetContent
                 )
             }
@@ -260,6 +255,7 @@ fun WidgetDeckOverlayScreen(
                 onPreviousPage = onPreviousPage,
                 onNextPage = onNextPage,
                 onOpenWidgetPicker = onOpenWidgetPicker,
+                onOpenOverlaySettings = onOpenOverlaySettings,
                 onStartEditPageLabel = onStartEditPageLabel,
                 onDraftChange = onDraftChange,
                 onCommitPageLabel = onCommitPageLabel,

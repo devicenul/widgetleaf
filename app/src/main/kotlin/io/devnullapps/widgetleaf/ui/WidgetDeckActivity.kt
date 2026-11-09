@@ -1,15 +1,20 @@
 package io.devnullapps.widgetleaf.ui
 
+import android.Manifest
 import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.service.quicksettings.TileService
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
@@ -56,6 +61,18 @@ class WidgetDeckActivity : ComponentActivity() {
     private var wasAlreadyResumed: Boolean = false
     private var lastPinTaskbarLeftState: Boolean = false
     private var lastPinTopBarRightState: Boolean = false
+    private var hasRequestedNotificationPermission: Boolean = false
+    private var lastSecondaryClickUptimeMs: Long = -10_000L
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted && ::viewModel.isInitialized) {
+            container.statusBarTriggerManager.syncStatusBarTrigger(
+                viewModel.uiState.value.settings.pinTopBarLeftStatusIcon
+            )
+        }
+    }
 
     private val bindWidgetLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -102,6 +119,25 @@ class WidgetDeckActivity : ComponentActivity() {
         viewModel.onOverlayShown()
         handleIncomingIntent(intent, isNewIntentWhileVisible = false)
 
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    if (SystemClock.uptimeMillis() - lastSecondaryClickUptimeMs < 600L) {
+                        return
+                    }
+                    if (::viewModel.isInitialized) {
+                        val consumed = viewModel.handleEscapeKey()
+                        if (!consumed) {
+                            finishWithoutAnimation()
+                        }
+                    } else {
+                        finishWithoutAnimation()
+                    }
+                }
+            }
+        )
+
         setContent {
             val uiState by viewModel.uiState.collectAsState()
             val isBlurActive by container.blurController.isBlurSupportedAndEnabled.collectAsState()
@@ -135,6 +171,18 @@ class WidgetDeckActivity : ComponentActivity() {
             LaunchedEffect(uiState.settings) {
                 val settings = uiState.settings
                 container.blurController.updateBlurRadius(window, settings.blurRadiusDp)
+                if (settings.pinTopBarLeftStatusIcon &&
+                    !hasRequestedNotificationPermission &&
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    hasRequestedNotificationPermission = true
+                    try {
+                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } catch (_: Throwable) {
+                        // Ignored in headless test environments
+                    }
+                }
                 container.statusBarTriggerManager.syncStatusBarTrigger(settings.pinTopBarLeftStatusIcon)
                 container.taskbarPlacementManager.syncRunningTaskbarPresence(
                     this@WidgetDeckActivity,
@@ -392,6 +440,9 @@ class WidgetDeckActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
+        if (SystemClock.uptimeMillis() - lastSecondaryClickUptimeMs < 600L) {
+            return
+        }
         if (::viewModel.isInitialized && viewModel.shouldAutoDismissOnUserLeave()) {
             finishWithoutAnimation()
         }
@@ -407,8 +458,52 @@ class WidgetDeckActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val isSecondaryButton = (ev.buttonState and MotionEvent.BUTTON_SECONDARY) != 0 ||
+            (ev.actionButton == MotionEvent.BUTTON_SECONDARY)
+        if (isSecondaryButton || ev.pointerCount >= 2) {
+            lastSecondaryClickUptimeMs = SystemClock.uptimeMillis()
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean {
+        val isSecondaryButton = (ev.buttonState and MotionEvent.BUTTON_SECONDARY) != 0 ||
+            (ev.actionButton == MotionEvent.BUTTON_SECONDARY)
+        if (isSecondaryButton) {
+            lastSecondaryClickUptimeMs = SystemClock.uptimeMillis()
+            super.dispatchGenericMotionEvent(ev)
+            if (ev.actionMasked == MotionEvent.ACTION_BUTTON_PRESS && ::viewModel.isInitialized) {
+                val state = viewModel.uiState.value
+                if (!state.isWidgetPickerOpen &&
+                    !state.isOverlaySettingsOpen &&
+                    state.contextMenuPosition == null &&
+                    state.editingWidgetId == null
+                ) {
+                    viewModel.openContextMenu(Pair(ev.x, ev.y))
+                }
+            }
+            // Always return true for secondary mouse/trackpad button events so Android ViewRootImpl
+            // does not convert an unhandled right-click / two-finger click into KEYCODE_BACK!
+            return true
+        }
+        return super.dispatchGenericMotionEvent(ev)
+    }
+
     @android.annotation.SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (SystemClock.uptimeMillis() - lastSecondaryClickUptimeMs < 600L) {
+                return true
+            }
+            if (event.action == KeyEvent.ACTION_UP && ::viewModel.isInitialized) {
+                val consumed = viewModel.handleEscapeKey()
+                if (!consumed) {
+                    finishWithoutAnimation()
+                }
+            }
+            return true
+        }
         if (event.action == KeyEvent.ACTION_DOWN && ::viewModel.isInitialized) {
             val state = viewModel.uiState.value
             val isTypingText = state.editingPageLabelIndex != null || state.isWidgetPickerOpen

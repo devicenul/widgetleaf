@@ -38,7 +38,9 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
@@ -61,6 +63,7 @@ fun PageIndicatorHud(
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
     onOpenWidgetPicker: () -> Unit,
+    onOpenOverlaySettings: () -> Unit = {},
     onStartEditPageLabel: (pageIndex: Int) -> Unit,
     onDraftChange: (draft: String) -> Unit = {},
     onCommitPageLabel: (pageIndex: Int, draft: String) -> Unit,
@@ -196,20 +199,30 @@ fun PageIndicatorHud(
                                 },
                                 shape = RoundedCornerShape(17.dp)
                             )
-                            .combinedClickable(
-                                onClick = { onSelectPage(page.pageIndex) },
-                                onLongClick = { onStartEditPageLabel(page.pageIndex) }
-                            )
                             .pointerInput(page.pageIndex) {
                                 awaitPointerEventScope {
                                     while (true) {
-                                        val event = awaitPointerEvent()
-                                        if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        val pressedCount = event.changes.count { it.pressed }
+                                        if (event.type == PointerEventType.Press &&
+                                            (event.buttons.isSecondaryPressed ||
+                                                event.keyboardModifiers.isCtrlPressed ||
+                                                pressedCount >= 2)
+                                        ) {
+                                            event.changes.forEach { it.consume() }
                                             onStartEditPageLabel(page.pageIndex)
+                                            do {
+                                                val next = awaitPointerEvent(PointerEventPass.Initial)
+                                                next.changes.forEach { it.consume() }
+                                            } while (next.changes.any { it.pressed })
                                         }
                                     }
                                 }
                             }
+                            .combinedClickable(
+                                onClick = { onSelectPage(page.pageIndex) },
+                                onLongClick = { onStartEditPageLabel(page.pageIndex) }
+                            )
                             .padding(horizontal = 14.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -257,6 +270,22 @@ fun PageIndicatorHud(
                     color = WidgetLeafTheme.palette.leafBright,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
+                )
+            }
+
+            // Overlay settings button
+            IconButton(
+                onClick = onOpenOverlaySettings,
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(WidgetLeafTheme.palette.glassSurfaceHover)
+                    .testTag("hud_settings_button")
+            ) {
+                Text(
+                    text = "⚙",
+                    color = WidgetLeafTheme.palette.textSecondary,
+                    fontSize = 15.sp
                 )
             }
         }

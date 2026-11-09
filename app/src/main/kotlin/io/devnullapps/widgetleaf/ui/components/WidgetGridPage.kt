@@ -1,13 +1,13 @@
 package io.devnullapps.widgetleaf.ui.components
 
+import android.os.SystemClock
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
@@ -85,25 +87,91 @@ fun WidgetGridPage(
     widgetContent: @Composable (PlacedWidget) -> Unit = { DefaultFramelessWidgetContent(it) }
 ) {
     val density = LocalDensity.current
+    var lastContextMenuOpenTimeMs by remember { mutableLongStateOf(-10_000L) }
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { onEmptyCanvasClick() },
-                    onLongPress = { pos -> onOpenContextMenu(Pair(pos.x, pos.y)) }
-                )
-            }
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
+                awaitEachGesture {
+                    var firstDownPos: Offset? = null
+                    var isSecondaryOrTwoFinger = false
+                    var contextMenuTriggered = false
+                    var movedBeyondSlop = false
+                    val touchSlop = viewConfiguration.touchSlop
+                    val longPressTimeoutMs = viewConfiguration.longPressTimeoutMillis
+                    var downTimeMs = 0L
+
                     while (true) {
-                        val event = awaitPointerEvent()
-                        if (event.type == PointerEventType.Press &&
-                            (event.buttons.isSecondaryPressed || event.keyboardModifiers.isCtrlPressed)
-                        ) {
-                            val pos = event.changes.firstOrNull()?.position ?: Offset.Zero
+                        val timeoutRemaining = if (firstDownPos != null && !isSecondaryOrTwoFinger && !contextMenuTriggered && !movedBeyondSlop) {
+                            (longPressTimeoutMs - (SystemClock.uptimeMillis() - downTimeMs)).coerceAtLeast(1L)
+                        } else {
+                            null
+                        }
+
+                        val event = if (timeoutRemaining != null) {
+                            withTimeoutOrNull(timeoutRemaining) {
+                                awaitPointerEvent(PointerEventPass.Main)
+                            }
+                        } else {
+                            awaitPointerEvent(PointerEventPass.Main)
+                        }
+
+                        if (event == null) {
+                            // Long-press timeout reached while finger still down
+                            val pos = firstDownPos ?: Offset.Zero
+                            contextMenuTriggered = true
+                            lastContextMenuOpenTimeMs = SystemClock.uptimeMillis()
                             onOpenContextMenu(Pair(pos.x, pos.y))
+                            continue
+                        }
+
+                        // Ignore non-press events before a gesture has started (e.g. mouse hover/move)
+                        val anyPressed = event.changes.any { it.pressed }
+                        val anyPreviouslyPressed = event.changes.any { it.previousPressed }
+                        if (firstDownPos == null && !anyPressed && !event.buttons.isSecondaryPressed) {
+                            continue
+                        }
+
+                        if (firstDownPos == null) {
+                            firstDownPos = event.changes.firstOrNull()?.position ?: Offset.Zero
+                            downTimeMs = SystemClock.uptimeMillis()
+                        }
+
+                        val pressedCount = event.changes.count { it.pressed }
+                        if (event.buttons.isSecondaryPressed ||
+                            event.keyboardModifiers.isCtrlPressed ||
+                            pressedCount >= 2
+                        ) {
+                            isSecondaryOrTwoFinger = true
+                            if (!contextMenuTriggered) {
+                                val pos = firstDownPos ?: event.changes.firstOrNull()?.position ?: Offset.Zero
+                                contextMenuTriggered = true
+                                lastContextMenuOpenTimeMs = SystemClock.uptimeMillis()
+                                onOpenContextMenu(Pair(pos.x, pos.y))
+                            }
+                        }
+
+                        if (isSecondaryOrTwoFinger || contextMenuTriggered) {
+                            event.changes.forEach { it.consume() }
+                            if (!anyPressed) {
+                                break
+                            }
+                            continue
+                        }
+
+                        val currentPos = event.changes.firstOrNull()?.position ?: firstDownPos
+                        if ((currentPos - firstDownPos).getDistance() > touchSlop) {
+                            movedBeyondSlop = true
+                        }
+
+                        if (!anyPressed && anyPreviouslyPressed) {
+                            event.changes.forEach { it.consume() }
+                            val sinceContextMs = SystemClock.uptimeMillis() - lastContextMenuOpenTimeMs
+                            if (!movedBeyondSlop && sinceContextMs > 400L) {
+                                onEmptyCanvasClick()
+                            }
+                            break
                         }
                     }
                 }
@@ -215,20 +283,30 @@ fun WidgetGridPage(
                                 }
                             } else {
                                 Modifier
-                                    .combinedClickable(
-                                        onClick = { /* Interactive widget click handled by host view */ },
-                                        onLongClick = { onEnterEditMode(widget.appWidgetId) }
-                                    )
                                     .pointerInput(widget.appWidgetId) {
                                         awaitPointerEventScope {
                                             while (true) {
-                                                val event = awaitPointerEvent()
-                                                if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                                val pressedCount = event.changes.count { it.pressed }
+                                                if (event.type == PointerEventType.Press &&
+                                                    (event.buttons.isSecondaryPressed ||
+                                                        event.keyboardModifiers.isCtrlPressed ||
+                                                        pressedCount >= 2)
+                                                ) {
+                                                    event.changes.forEach { it.consume() }
                                                     onEnterEditMode(widget.appWidgetId)
+                                                    do {
+                                                        val next = awaitPointerEvent(PointerEventPass.Initial)
+                                                        next.changes.forEach { it.consume() }
+                                                    } while (next.changes.any { it.pressed })
                                                 }
                                             }
                                         }
                                     }
+                                    .combinedClickable(
+                                        onClick = { /* Interactive widget click handled by host view */ },
+                                        onLongClick = { onEnterEditMode(widget.appWidgetId) }
+                                    )
                             }
                         )
                 ) {

@@ -8,8 +8,8 @@ data class OverlaySettings(
     val lastViewedPageIndex: Int = 0,
     val launchOnStartup: Boolean = false,
     val pinTaskbarLeft: Boolean = false,
-    val showInRunningTaskbarRight: Boolean = false,
-    val pinTopBarLeftStatusIcon: Boolean = false,
+    val showInRunningTaskbarRight: Boolean = true,
+    val pinTopBarLeftStatusIcon: Boolean = true,
     val pinTopBarRightQsTile: Boolean = false,
     val useCenteredBentoCanvas: Boolean = true
 )

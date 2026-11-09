@@ -239,8 +239,8 @@ class WidgetDeckRepositoryTest {
         assertThat(initial.lastViewedPageIndex).isEqualTo(0)
         assertThat(initial.launchOnStartup).isFalse()
         assertThat(initial.pinTaskbarLeft).isFalse()
-        assertThat(initial.showInRunningTaskbarRight).isFalse()
-        assertThat(initial.pinTopBarLeftStatusIcon).isFalse()
+        assertThat(initial.showInRunningTaskbarRight).isTrue()
+        assertThat(initial.pinTopBarLeftStatusIcon).isTrue()
         assertThat(initial.pinTopBarRightQsTile).isFalse()
         assertThat(initial.useCenteredBentoCanvas).isTrue()
 
@@ -254,8 +254,8 @@ class WidgetDeckRepositoryTest {
                 lastViewedPageIndex = 3,
                 launchOnStartup = true,
                 pinTaskbarLeft = true,
-                showInRunningTaskbarRight = true,
-                pinTopBarLeftStatusIcon = true,
+                showInRunningTaskbarRight = false,
+                pinTopBarLeftStatusIcon = false,
                 pinTopBarRightQsTile = true,
                 useCenteredBentoCanvas = false
             )
@@ -269,8 +269,8 @@ class WidgetDeckRepositoryTest {
         assertThat(updated.lastViewedPageIndex).isEqualTo(3)
         assertThat(updated.launchOnStartup).isTrue()
         assertThat(updated.pinTaskbarLeft).isTrue()
-        assertThat(updated.showInRunningTaskbarRight).isTrue()
-        assertThat(updated.pinTopBarLeftStatusIcon).isTrue()
+        assertThat(updated.showInRunningTaskbarRight).isFalse()
+        assertThat(updated.pinTopBarLeftStatusIcon).isFalse()
         assertThat(updated.pinTopBarRightQsTile).isTrue()
         assertThat(updated.useCenteredBentoCanvas).isFalse()
     }

@@ -386,13 +386,13 @@ class DeckScreenComposeTest {
         composeTestRule.onNodeWithTag("setting_launch_on_startup").performScrollTo().performClick()
         assertThat(currentSettings.launchOnStartup).isTrue()
 
-        // Toggle 3: showInRunningTaskbarRight
+        // Toggle 3: showInRunningTaskbarRight (default is true -> toggles to false)
         composeTestRule.onNodeWithTag("setting_running_taskbar_right").performScrollTo().performClick()
-        assertThat(currentSettings.showInRunningTaskbarRight).isTrue()
+        assertThat(currentSettings.showInRunningTaskbarRight).isFalse()
 
-        // Toggle 4: pinTopBarLeftStatusIcon
+        // Toggle 4: pinTopBarLeftStatusIcon (default is true -> toggles to false)
         composeTestRule.onNodeWithTag("setting_top_bar_left").performScrollTo().performClick()
-        assertThat(currentSettings.pinTopBarLeftStatusIcon).isTrue()
+        assertThat(currentSettings.pinTopBarLeftStatusIcon).isFalse()
 
         // Toggle 5: useDynamicColor
         composeTestRule.onNodeWithTag("setting_dynamic_color").performScrollTo().performClick()

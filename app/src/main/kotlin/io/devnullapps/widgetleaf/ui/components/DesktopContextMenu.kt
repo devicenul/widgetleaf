@@ -1,8 +1,8 @@
 package io.devnullapps.widgetleaf.ui.components
 
-import androidx.compose.foundation.background
+import android.os.SystemClock
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,7 +22,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -55,18 +57,43 @@ fun DesktopContextMenu(
     val clampedX = position.first.coerceIn(16f, (screenWidthPx - menuWidthPx - 16f).coerceAtLeast(16f))
     val clampedY = position.second.coerceIn(16f, (screenHeightPx - menuHeightPx - 16f).coerceAtLeast(16f))
 
+    val openedAtUptimeMs = remember(position) { SystemClock.uptimeMillis() }
+
     Box(
         modifier = modifier.fillMaxSize()
     ) {
-        // Scrim backdrop for outside click dismissal
+        // Scrim backdrop for outside click dismissal (ignores trailing release of the opening gesture)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismissRequest
-                )
+                .pointerInput(position) {
+                    awaitEachGesture {
+                        var sawFreshPrimaryDown = false
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Main)
+                            val elapsedMs = SystemClock.uptimeMillis() - openedAtUptimeMs
+                            val anyPressed = event.changes.any { it.pressed }
+                            val anyPrevPressed = event.changes.any { it.previousPressed }
+                            val isSecondary = event.buttons.isSecondaryPressed || event.changes.count { it.pressed } >= 2
+
+                            event.changes.forEach { it.consume() }
+
+                            if (elapsedMs < 250L || isSecondary) {
+                                if (!anyPressed) break
+                                continue
+                            }
+
+                            if (anyPressed && !anyPrevPressed) {
+                                sawFreshPrimaryDown = true
+                            } else if (!anyPressed && anyPrevPressed) {
+                                if (sawFreshPrimaryDown) {
+                                    onDismissRequest()
+                                }
+                                break
+                            }
+                        }
+                    }
+                }
         )
 
         GlassHudSurface(

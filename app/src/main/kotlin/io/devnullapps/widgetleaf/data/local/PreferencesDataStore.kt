@@ -53,8 +53,8 @@ class PreferencesDataStore(
                 lastViewedPageIndex = preferences[KEY_LAST_VIEWED_PAGE_INDEX] ?: 0,
                 launchOnStartup = preferences[KEY_LAUNCH_ON_STARTUP] ?: false,
                 pinTaskbarLeft = preferences[KEY_PIN_TASKBAR_LEFT] ?: false,
-                showInRunningTaskbarRight = preferences[KEY_SHOW_IN_RUNNING_TASKBAR_RIGHT] ?: false,
-                pinTopBarLeftStatusIcon = preferences[KEY_PIN_TOP_BAR_LEFT_STATUS_ICON] ?: false,
+                showInRunningTaskbarRight = preferences[KEY_SHOW_IN_RUNNING_TASKBAR_RIGHT] ?: true,
+                pinTopBarLeftStatusIcon = preferences[KEY_PIN_TOP_BAR_LEFT_STATUS_ICON] ?: true,
                 pinTopBarRightQsTile = preferences[KEY_PIN_TOP_BAR_RIGHT_QS_TILE] ?: false,
                 useCenteredBentoCanvas = preferences[KEY_USE_CENTERED_BENTO_CANVAS] ?: true
             )
