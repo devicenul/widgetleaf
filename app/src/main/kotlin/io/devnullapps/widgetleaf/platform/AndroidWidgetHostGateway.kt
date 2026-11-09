@@ -58,7 +58,16 @@ class AndroidWidgetHostGateway(
 
     override fun getInstalledCatalog(gridProfile: DesktopGridProfile): List<WidgetCatalogItem> {
         val providers = try {
-            appWidgetManager.installedProviders ?: emptyList()
+            val base = appWidgetManager.installedProviders.orEmpty()
+            val userManager = context.getSystemService(android.os.UserManager::class.java)
+            val profileProviders = userManager?.userProfiles?.flatMap { profile ->
+                try {
+                    appWidgetManager.getInstalledProvidersForProfile(profile).orEmpty()
+                } catch (_: Throwable) {
+                    emptyList()
+                }
+            }.orEmpty()
+            (base + profileProviders).distinctBy { it.provider }
         } catch (t: Throwable) {
             emptyList()
         }

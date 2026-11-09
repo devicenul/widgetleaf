@@ -4,6 +4,20 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Android 11+ (API 30+) Package Visibility: allows AppWidgetManager.getInstalledProviders()
+         and PackageManager to discover all installed widget providers without QUERY_ALL_PACKAGES -->
+    <queries>
+        <intent>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+        </intent>
+        <intent>
+            <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+        </intent>
+    </queries>
+
     <application
         android:name=".WidgetLeafApp"
         android:allowBackup="true"
