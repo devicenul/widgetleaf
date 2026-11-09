@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Application Brand & Identity -->
+    <string name="app_name">WidgetLeaf</string>
+
+    <!-- Empty Canvas HUD Hint -->
+    <string name="empty_canvas_hint">Right-click or press + to add a widget</string>
+
+    <!-- Desktop Launcher & Taskbar Shortcuts -->
+    <string name="shortcut_overlay_settings">Overlay Settings</string>
+    <string name="shortcut_overlay_settings_desc">Configure WidgetLeaf blur, grid, and activation triggers</string>
+    <string name="shortcut_add_widget">Add Widget</string>
+    <string name="shortcut_add_widget_desc">Open widget picker to place a new widget on the deck</string>
+
+    <!-- Quick Settings & BentoBar Tile -->
+    <string name="tile_widget_deck_label">Widget Deck</string>
+    <string name="tile_widget_deck_subtitle">Toggle Overlay</string>
+    <string name="tile_widget_deck_active">Active</string>
+    <string name="tile_widget_deck_inactive">Inactive</string>
+
+    <!-- Status Bar Notification Channel & Trigger -->
+    <string name="notification_channel_status_name">Top Bar Trigger</string>
+    <string name="notification_channel_status_desc">Persistent status bar trigger icon for quick access to WidgetLeaf</string>
+    <string name="notification_status_title">WidgetLeaf Active</string>
+    <string name="notification_status_text">Click to toggle widget deck</string>
+    <string name="notification_action_settings">Settings</string>
+
+    <!-- Accessibility Content Descriptions -->
+    <string name="desc_app_icon">WidgetLeaf application icon</string>
+    <string name="desc_add_widget">Add new widget</string>
+    <string name="desc_overlay_settings">Overlay settings</string>
+    <string name="desc_widget_deck_tile">WidgetLeaf quick settings tile</string>
+    <string name="desc_taskbar_pin">WidgetLeaf taskbar pin</string>
+    <string name="desc_page_indicator">Deck page indicator</string>
+    <string name="desc_previous_page">Navigate to previous page</string>
+    <string name="desc_next_page">Navigate to next page</string>
+    <string name="desc_edit_page_label">Edit page label</string>
+    <string name="desc_remove_widget">Remove widget from deck</string>
+    <string name="desc_resize_widget">Resize widget</string>
+    <string name="desc_reconfigure_widget">Reconfigure widget</string>
+    <string name="desc_widget_card">Widget frame</string>
+    <string name="desc_widget_picker_search">Search installed widgets</string>
+    <string name="desc_close_picker">Close widget picker</string>
+</resources>

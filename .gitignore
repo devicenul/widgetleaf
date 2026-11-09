@@ -15,6 +15,7 @@ release/
 
 # Gradle files
 .gradle/
+.kotlin/
 build/
 app/build/
 
