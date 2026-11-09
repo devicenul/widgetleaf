@@ -245,25 +245,27 @@ fun WidgetDeckOverlayScreen(
                 )
             }
 
-            // LAYER 2 (Cont.): Bottom Pagination HUD Pill
-            PageIndicatorHud(
-                pages = uiState.pages,
-                activePageIndex = uiState.activePageIndex,
-                editingPageLabelIndex = uiState.editingPageLabelIndex,
-                editingPageLabelDraft = uiState.editingPageLabelDraft,
-                onSelectPage = onSelectPage,
-                onPreviousPage = onPreviousPage,
-                onNextPage = onNextPage,
-                onOpenWidgetPicker = onOpenWidgetPicker,
-                onOpenOverlaySettings = onOpenOverlaySettings,
-                onStartEditPageLabel = onStartEditPageLabel,
-                onDraftChange = onDraftChange,
-                onCommitPageLabel = onCommitPageLabel,
-                onCancelEditPageLabel = onCancelEditPageLabel,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 24.dp)
-            )
+            // LAYER 2 (Cont.): Bottom Pagination HUD Pill (hidden while modal sheets/dialogs are open)
+            if (!uiState.isWidgetPickerOpen && !uiState.isOverlaySettingsOpen) {
+                PageIndicatorHud(
+                    pages = uiState.pages,
+                    activePageIndex = uiState.activePageIndex,
+                    editingPageLabelIndex = uiState.editingPageLabelIndex,
+                    editingPageLabelDraft = uiState.editingPageLabelDraft,
+                    onSelectPage = onSelectPage,
+                    onPreviousPage = onPreviousPage,
+                    onNextPage = onNextPage,
+                    onOpenWidgetPicker = onOpenWidgetPicker,
+                    onOpenOverlaySettings = onOpenOverlaySettings,
+                    onStartEditPageLabel = onStartEditPageLabel,
+                    onDraftChange = onDraftChange,
+                    onCommitPageLabel = onCommitPageLabel,
+                    onCancelEditPageLabel = onCancelEditPageLabel,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 24.dp)
+                )
+            }
 
             // LAYER 4: Desktop Context Menu, Widget Picker & Overlay Settings Dialog
             DesktopContextMenu(

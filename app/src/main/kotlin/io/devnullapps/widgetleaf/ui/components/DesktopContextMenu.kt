@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -100,9 +102,10 @@ fun DesktopContextMenu(
             modifier = Modifier
                 .offset { IntOffset(clampedX.roundToInt(), clampedY.roundToInt()) }
                 .width(220.dp)
-                .testTag("desktop_context_menu")
-                .padding(vertical = 6.dp),
-            shape = RoundedCornerShape(16.dp)
+                .testTag("desktop_context_menu"),
+            shape = RoundedCornerShape(16.dp),
+            backgroundColor = Color(0xF0161B22),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth()

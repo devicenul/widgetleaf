@@ -60,11 +60,16 @@ class BootCompletedReceiver(
                 val settings = settingsProvider?.invoke(context)
                     ?: DefaultServicesContainer.getPreferencesDataStore(context).settingsFlow.first()
 
-                val shouldEnableTopBar = settings.launchOnStartup || settings.pinTopBarLeftStatusIcon
+                val shouldEnableTopBar = settings.launchOnStartup ||
+                    settings.pinToTopBar ||
+                    settings.pinTopBarLeftStatusIcon
                 statusBarTriggerManager.syncStatusBarTrigger(shouldEnableTopBar)
 
                 if (shouldEnableTopBar) {
-                    taskbarPlacementManager.syncDynamicShortcuts(context)
+                    taskbarPlacementManager.syncRunningTaskbarPresence(
+                        context,
+                        settings.effectiveShowInRunningTaskbar
+                    )
                 }
             } finally {
                 pendingResult?.finish()

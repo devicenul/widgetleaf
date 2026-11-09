@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -59,6 +60,7 @@ fun GlassHudSurface(
     borderColor: Color = WidgetLeafTheme.palette.glassBorder,
     specularColor: Color = WidgetLeafTheme.palette.glassSpecular,
     borderWidth: Dp = 1.dp,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
     content: @Composable BoxScope.() -> Unit
 ) {
     Box(
@@ -89,7 +91,8 @@ fun GlassHudSurface(
                     end = Offset(specularWidth / 2f, size.height * 0.5f),
                     strokeWidth = specularWidth
                 )
-            },
+            }
+            .padding(contentPadding),
         content = content
     )
 }

@@ -171,7 +171,7 @@ class WidgetDeckActivity : ComponentActivity() {
             LaunchedEffect(uiState.settings) {
                 val settings = uiState.settings
                 container.blurController.updateBlurRadius(window, settings.blurRadiusDp)
-                if (settings.pinTopBarLeftStatusIcon &&
+                if (settings.pinToTopBar &&
                     !hasRequestedNotificationPermission &&
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                     checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -183,10 +183,10 @@ class WidgetDeckActivity : ComponentActivity() {
                         // Ignored in headless test environments
                     }
                 }
-                container.statusBarTriggerManager.syncStatusBarTrigger(settings.pinTopBarLeftStatusIcon)
+                container.statusBarTriggerManager.syncStatusBarTrigger(settings.pinToTopBar)
                 container.taskbarPlacementManager.syncRunningTaskbarPresence(
                     this@WidgetDeckActivity,
-                    settings.showInRunningTaskbarRight
+                    settings.effectiveShowInRunningTaskbar
                 )
 
                 val updatedProfile = container.gridProfileResolver.resolve(
@@ -513,6 +513,11 @@ class WidgetDeckActivity : ComponentActivity() {
                 if (!consumed) {
                     finishWithoutAnimation()
                 }
+                return true
+            }
+
+            if (!isTypingText && !state.isOverlaySettingsOpen && state.settings.matchesKeyEvent(event)) {
+                finishWithoutAnimation()
                 return true
             }
 

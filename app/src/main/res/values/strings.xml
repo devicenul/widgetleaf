@@ -25,6 +25,9 @@
     <string name="notification_status_title">WidgetLeaf Active</string>
     <string name="notification_status_text">Click to toggle widget deck</string>
     <string name="notification_action_settings">Settings</string>
+    <string name="top_bar_service_label">WidgetLeaf Top Bar &amp; Hotkey</string>
+    <string name="top_bar_service_description">Pins a clickable WidgetLeaf icon to the desktop top bar (Left or Right, compatible with BentoBar) and listens for your global keyboard shortcut to toggle the widget pane.</string>
+    <string name="shortcut_toggle_deck_label">Toggle WidgetLeaf</string>
 
     <!-- Accessibility Content Descriptions -->
     <string name="desc_app_icon">WidgetLeaf application icon</string>

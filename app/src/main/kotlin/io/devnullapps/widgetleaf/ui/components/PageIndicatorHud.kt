@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -14,11 +15,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -73,23 +74,24 @@ fun PageIndicatorHud(
     GlassHudSurface(
         modifier = modifier
             .testTag("bottom_pagination_hud")
-            .height(52.dp)
-            .padding(horizontal = 8.dp),
-        shape = RoundedCornerShape(26.dp)
+            .height(52.dp),
+        shape = RoundedCornerShape(26.dp),
+        backgroundColor = Color(0xD9161B22),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Row(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .padding(horizontal = 8.dp),
+            modifier = Modifier.align(Alignment.Center),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Previous page button
-            IconButton(
-                onClick = onPreviousPage,
+            Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .testTag("page_prev_button")
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onPreviousPage)
+                    .testTag("page_prev_button"),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "◀",
@@ -120,9 +122,9 @@ fun PageIndicatorHud(
                             .clip(RoundedCornerShape(17.dp))
                             .background(WidgetLeafTheme.palette.glassSurfaceHover)
                             .border(1.dp, WidgetLeafTheme.palette.leafPrimary, RoundedCornerShape(17.dp))
-                            .padding(horizontal = 8.dp),
+                            .padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         BasicTextField(
                             value = localDraft,
@@ -161,7 +163,7 @@ fun PageIndicatorHud(
                         Box(
                             modifier = Modifier
                                 .size(24.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(CircleShape)
                                 .background(WidgetLeafTheme.palette.leafPrimary.copy(alpha = 0.35f))
                                 .testTag("page_label_save_${page.pageIndex}")
                                 .clickable {
@@ -182,6 +184,7 @@ fun PageIndicatorHud(
                         modifier = Modifier
                             .testTag("page_pill_${page.pageIndex}")
                             .height(34.dp)
+                            .widthIn(min = 34.dp)
                             .clip(RoundedCornerShape(17.dp))
                             .background(
                                 if (isCurrent) {
@@ -223,7 +226,7 @@ fun PageIndicatorHud(
                                 onClick = { onSelectPage(page.pageIndex) },
                                 onLongClick = { onStartEditPageLabel(page.pageIndex) }
                             )
-                            .padding(horizontal = 14.dp),
+                            .padding(horizontal = 12.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -241,11 +244,13 @@ fun PageIndicatorHud(
             }
 
             // Next page button
-            IconButton(
-                onClick = onNextPage,
+            Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .testTag("page_next_button")
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onNextPage)
+                    .testTag("page_next_button"),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "▶",
@@ -254,16 +259,18 @@ fun PageIndicatorHud(
                 )
             }
 
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(2.dp))
 
-            // Add widget button
-            IconButton(
-                onClick = onOpenWidgetPicker,
+            // Add widget button (34dp circular pill with clean separation)
+            Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(WidgetLeafTheme.palette.leafPrimary.copy(alpha = 0.18f))
-                    .testTag("hud_add_widget_button")
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(WidgetLeafTheme.palette.leafPrimary.copy(alpha = 0.22f))
+                    .border(0.5.dp, WidgetLeafTheme.palette.leafPrimary.copy(alpha = 0.6f), CircleShape)
+                    .clickable(onClick = onOpenWidgetPicker)
+                    .testTag("hud_add_widget_button"),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "+",
@@ -273,14 +280,16 @@ fun PageIndicatorHud(
                 )
             }
 
-            // Overlay settings button
-            IconButton(
-                onClick = onOpenOverlaySettings,
+            // Overlay settings button (34dp circular pill with clean separation)
+            Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(18.dp))
+                    .size(34.dp)
+                    .clip(CircleShape)
                     .background(WidgetLeafTheme.palette.glassSurfaceHover)
-                    .testTag("hud_settings_button")
+                    .border(0.5.dp, WidgetLeafTheme.palette.glassBorder, CircleShape)
+                    .clickable(onClick = onOpenOverlaySettings)
+                    .testTag("hud_settings_button"),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = "⚙",

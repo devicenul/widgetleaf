@@ -21,6 +21,7 @@ import com.google.common.truth.Truth.assertThat
 import io.devnullapps.widgetleaf.domain.model.DeckPage
 import io.devnullapps.widgetleaf.domain.model.OverlaySettings
 import io.devnullapps.widgetleaf.domain.model.PlacedWidget
+import io.devnullapps.widgetleaf.domain.model.TopBarPosition
 import io.devnullapps.widgetleaf.domain.model.WidgetCatalogItem
 import io.devnullapps.widgetleaf.ui.components.WidgetDeckOverlayScreen
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckUiState
@@ -377,6 +378,8 @@ class DeckScreenComposeTest {
         }
 
         composeTestRule.onNodeWithTag("overlay_settings_dialog").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("overlay_settings_version_badge").assertTextEquals("v0.0.1")
+        composeTestRule.onNodeWithTag("current_hotkey_badge").assertTextEquals("Alt + W")
 
         // Toggle 1: openOnPageOne
         composeTestRule.onNodeWithTag("setting_open_on_page_one").performScrollTo().performClick()
@@ -386,13 +389,23 @@ class DeckScreenComposeTest {
         composeTestRule.onNodeWithTag("setting_launch_on_startup").performScrollTo().performClick()
         assertThat(currentSettings.launchOnStartup).isTrue()
 
+        // Top Bar Position: switch to RIGHT then back to LEFT
+        composeTestRule.onNodeWithTag("setting_top_bar_position_right").performScrollTo().performClick()
+        assertThat(currentSettings.topBarPosition).isEqualTo(TopBarPosition.RIGHT)
+        composeTestRule.onNodeWithTag("setting_top_bar_position_left").performScrollTo().performClick()
+        assertThat(currentSettings.topBarPosition).isEqualTo(TopBarPosition.LEFT)
+
+        // While pinned to top bar, effectiveShowInRunningTaskbar is false
+        assertThat(currentSettings.effectiveShowInRunningTaskbar).isFalse()
+
         // Toggle 3: showInRunningTaskbarRight (default is true -> toggles to false)
         composeTestRule.onNodeWithTag("setting_running_taskbar_right").performScrollTo().performClick()
         assertThat(currentSettings.showInRunningTaskbarRight).isFalse()
 
-        // Toggle 4: pinTopBarLeftStatusIcon (default is true -> toggles to false)
+        // Toggle 4: pinToTopBar / pinTopBarLeftStatusIcon (default is true -> toggles to false)
         composeTestRule.onNodeWithTag("setting_top_bar_left").performScrollTo().performClick()
         assertThat(currentSettings.pinTopBarLeftStatusIcon).isFalse()
+        assertThat(currentSettings.pinToTopBar).isFalse()
 
         // Toggle 5: useDynamicColor
         composeTestRule.onNodeWithTag("setting_dynamic_color").performScrollTo().performClick()

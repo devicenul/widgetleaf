@@ -12,6 +12,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -86,10 +87,12 @@ fun WidgetPickerBottomSheet(
             modifier = Modifier
                 .widthIn(max = 720.dp)
                 .fillMaxWidth()
-                .heightIn(min = 320.dp, max = 560.dp)
-                .testTag("widget_picker_sheet")
-                .padding(20.dp),
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+                .heightIn(min = 340.dp, max = 580.dp)
+                .padding(horizontal = 24.dp, vertical = 20.dp)
+                .testTag("widget_picker_sheet"),
+            shape = RoundedCornerShape(24.dp),
+            backgroundColor = Color(0xEB161B22),
+            contentPadding = PaddingValues(24.dp)
         ) {
             Column(
                 modifier = Modifier.fillMaxSize()
@@ -107,14 +110,19 @@ fun WidgetPickerBottomSheet(
                         fontWeight = FontWeight.Bold
                     )
 
-                    IconButton(
-                        onClick = onDismissRequest,
-                        modifier = Modifier.size(32.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(WidgetLeafTheme.palette.glassSurfaceHover)
+                            .clickable(onClick = onDismissRequest),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = "✕",
                             color = WidgetLeafTheme.palette.textSecondary,
-                            fontSize = 16.sp
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
