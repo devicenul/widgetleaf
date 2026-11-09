@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="shortcut_add_widget"
+        android:enabled="true"
+        android:icon="@drawable/ic_taskbar_pin"
+        android:shortcutShortLabel="@string/shortcut_add_widget"
+        android:shortcutLongLabel="@string/shortcut_add_widget_desc">
+        <intent
+            android:action="io.devnullapps.widgetleaf.ACTION_OPEN_WIDGET_PICKER"
+            android:targetPackage="io.devnullapps.widgetleaf"
+            android:targetClass="io.devnullapps.widgetleaf.ui.WidgetDeckActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="shortcut_overlay_settings"
+        android:enabled="true"
+        android:icon="@drawable/ic_qs_tile_leaf"
+        android:shortcutShortLabel="@string/shortcut_overlay_settings"
+        android:shortcutLongLabel="@string/shortcut_overlay_settings_desc">
+        <intent
+            android:action="io.devnullapps.widgetleaf.ACTION_OPEN_OVERLAY_SETTINGS"
+            android:targetPackage="io.devnullapps.widgetleaf"
+            android:targetClass="io.devnullapps.widgetleaf.ui.WidgetDeckActivity" />
+    </shortcut>
+</shortcuts>
