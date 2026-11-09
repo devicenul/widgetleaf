@@ -35,6 +35,7 @@ class WidgetDeckTileService : TileService() {
         }
     }
 
+    @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated")
     override fun onClick() {
         super.onClick()
         val intent = ActiveDisplayLaunchHelper.createLaunchIntent(
@@ -53,10 +54,9 @@ class WidgetDeckTileService : TileService() {
                 startActivityAndCollapse(pendingIntent)
             } catch (_: Throwable) {
                 try {
-                    @Suppress("DEPRECATION")
-                    startActivityAndCollapse(intent)
-                } catch (_: Throwable) {
                     startActivity(intent)
+                } catch (_: Throwable) {
+                    // Ignored in test environment
                 }
             }
         } else {

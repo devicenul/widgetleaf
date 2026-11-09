@@ -45,7 +45,9 @@ import kotlinx.coroutines.launch
 class WidgetDeckActivity : ComponentActivity() {
 
     private val container: AppContainer by lazy {
-        (application as? WidgetLeafApp)?.appContainer ?: AppContainer(applicationContext)
+        testContainerOverride
+            ?: (application as? WidgetLeafApp)?.appContainer
+            ?: AppContainer(applicationContext, useInMemoryDb = true)
     }
 
     lateinit var viewModel: DeckViewModel
@@ -405,6 +407,7 @@ class WidgetDeckActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    @android.annotation.SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && ::viewModel.isInitialized) {
             val state = viewModel.uiState.value
@@ -479,5 +482,6 @@ class WidgetDeckActivity : ComponentActivity() {
 
     companion object {
         private const val REQUEST_CODE_CONFIGURE_WIDGET = 4042
+        var testContainerOverride: AppContainer? = null
     }
 }

@@ -1,3 +1,5 @@
+import org.gradle.testing.jacoco.plugins.JacocoTaskExtension
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -72,6 +74,15 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             isReturnDefaultValues = true
+            all {
+                it.maxParallelForks = 1
+                it.jvmArgs("-Xmx512m", "-XX:MaxMetaspaceSize=256m")
+                it.extensions.configure(JacocoTaskExtension::class.java) {
+                    isIncludeNoLocationClasses = true
+                    includes = listOf("io.devnullapps.widgetleaf.*")
+                    excludes = listOf("jdk.internal.*")
+                }
+            }
         }
     }
 
@@ -103,7 +114,8 @@ tasks.register<JacocoReport>("jacocoTestReport") {
         "**/Manifest*.*",
         "**/*Test*.*",
         "android/**/*.*",
-        "**/ComposableSingletons$*.*"
+        "**/ComposableSingletons$*.*",
+        "**/*_Impl*.*"
     )
 
     val debugTree = fileTree("${layout.buildDirectory.get()}/tmp/kotlin-classes/debug") {

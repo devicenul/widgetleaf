@@ -21,16 +21,25 @@ import io.devnullapps.widgetleaf.services.StatusBarTriggerManager
 import io.devnullapps.widgetleaf.services.TaskbarPlacementManager
 import io.devnullapps.widgetleaf.ui.hostview.WidgetDeckHost
 
-open class AppContainer(context: Context) {
+open class AppContainer(
+    context: Context,
+    private val useInMemoryDb: Boolean = false
+) {
 
     private val appContext = context.applicationContext
 
     val database: LeafDatabase by lazy {
-        Room.databaseBuilder(
-            appContext,
-            LeafDatabase::class.java,
-            "widgetleaf_deck.db"
-        ).fallbackToDestructiveMigration().build()
+        if (useInMemoryDb) {
+            Room.inMemoryDatabaseBuilder(appContext, LeafDatabase::class.java)
+                .allowMainThreadQueries()
+                .build()
+        } else {
+            Room.databaseBuilder(
+                appContext,
+                LeafDatabase::class.java,
+                "widgetleaf_deck.db"
+            ).fallbackToDestructiveMigration().build()
+        }
     }
 
     val preferencesDataStore: PreferencesDataStore by lazy {

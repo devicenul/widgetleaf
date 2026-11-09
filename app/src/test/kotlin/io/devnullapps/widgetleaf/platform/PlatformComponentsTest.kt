@@ -1,5 +1,6 @@
 package io.devnullapps.widgetleaf.platform
 
+import android.app.Activity
 import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
@@ -11,14 +12,18 @@ import android.view.Window
 import android.view.WindowManager
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
+import io.devnullapps.widgetleaf.WidgetLeafApp
 import io.devnullapps.widgetleaf.domain.model.DesktopGridProfile
 import io.devnullapps.widgetleaf.domain.usecase.WidgetSpanCalculator
+import io.devnullapps.widgetleaf.services.ActiveDisplayLaunchHelper
 import io.devnullapps.widgetleaf.ui.hostview.DeckAppWidgetHostView
 import io.devnullapps.widgetleaf.ui.hostview.WidgetDeckHost
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -161,5 +166,113 @@ class PlatformComponentsTest {
             maxWidthDp = 296,
             maxHeightDp = 140
         )
+    }
+
+    @Test
+    fun androidWidgetHostGatewayLifecycleAndQueryMethods() {
+        val appWidgetManager = AppWidgetManager.getInstance(context)
+        val shadowAwm = Shadows.shadowOf(appWidgetManager)
+        shadowAwm.setAllowedToBindAppWidgets(true)
+        shadowAwm.setValidWidgetProviderComponentName(true)
+
+        val host = WidgetDeckHost(context)
+        val gateway = AndroidWidgetHostGateway(
+            context = context,
+            widgetDeckHost = host,
+            appWidgetManager = appWidgetManager
+        )
+
+        // Lifecycle calls
+        gateway.startListening()
+        gateway.stopListening()
+
+        // Allocated IDs
+        val ids = gateway.getAllocatedAppWidgetIds()
+        assertThat(ids).isNotNull()
+
+        // Provider configuration and checks
+        val providerComponent = ComponentName(context.packageName, "io.devnullapps.widgetleaf.TestWidgetProvider")
+        val info = AppWidgetProviderInfo().apply {
+            provider = providerComponent
+            minWidth = 140
+            minHeight = 140
+            minResizeWidth = 140
+            minResizeHeight = 140
+            resizeMode = AppWidgetProviderInfo.RESIZE_BOTH
+        }
+        shadowAwm.addInstalledProvider(info)
+
+        val isInstalled = gateway.isProviderInstalled(context.packageName, "io.devnullapps.widgetleaf.TestWidgetProvider")
+        assertThat(isInstalled).isTrue()
+
+        val isNotInstalled = gateway.isProviderInstalled("non.existent", "Provider")
+        assertThat(isNotInstalled).isFalse()
+
+        // Catalog
+        val profile = DesktopGridProfileResolver.resolve(1440f, 900f)
+        val catalog = gateway.getInstalledCatalog(profile)
+        assertThat(catalog).isNotEmpty()
+        val found = catalog.firstOrNull { it.providerClass == "io.devnullapps.widgetleaf.TestWidgetProvider" }
+        assertThat(found).isNotNull()
+
+        // Bind and config
+        val widgetId = gateway.allocateAppWidgetId()
+        val bound = gateway.bindAppWidgetIdIfAllowed(widgetId, providerComponent)
+        assertThat(bound).isTrue()
+        val hasConfig = gateway.hasConfigurationActivity(widgetId)
+        assertThat(hasConfig).isFalse()
+        val isReconfig = gateway.isReconfigurable(widgetId)
+        assertThat(isReconfig).isFalse()
+
+        gateway.deleteAppWidgetId(widgetId)
+    }
+
+    // --- Blur Controller Window Attach Tests ---
+
+    @Test
+    fun blurControllerAttachesUpdatesAndDetachesWindow() {
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val window = activity.window
+        val blurController = AndroidWindowBlurController(context)
+
+        blurController.attachToWindow(window, blurRadiusDp = 32)
+        blurController.updateBlurRadius(window, blurRadiusDp = 48)
+        blurController.detachFromWindow(window)
+    }
+
+    // --- ActiveDisplayLaunchHelper Tests ---
+
+    @Test
+    fun activeDisplayLaunchHelperBuildsIntentsAndOptions() {
+        val displayId = ActiveDisplayLaunchHelper.getActiveDisplayId(context)
+        assertThat(displayId).isEqualTo(android.view.Display.DEFAULT_DISPLAY)
+
+        val intent = ActiveDisplayLaunchHelper.createLaunchIntent(context)
+        assertThat(intent.action).isEqualTo(ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK)
+        assertThat(intent.component?.className).isEqualTo(ActiveDisplayLaunchHelper.DECK_ACTIVITY_CLASS_NAME)
+
+        val options = ActiveDisplayLaunchHelper.createLaunchOptions(context, displayId)
+        assertThat(options).isNotNull()
+
+        val pendingIntent = ActiveDisplayLaunchHelper.createLaunchPendingIntent(
+            context = context,
+            action = ActiveDisplayLaunchHelper.ACTION_OPEN_WIDGET_PICKER,
+            requestCode = 100
+        )
+        assertThat(pendingIntent).isNotNull()
+    }
+
+    // --- WidgetLeafApp Application Container Tests ---
+
+    @Test
+    fun widgetLeafAppInitializesContainer() {
+        val app = WidgetLeafApp()
+        val attachBaseContext = android.content.ContextWrapper::class.java.getDeclaredMethod("attachBaseContext", Context::class.java)
+        attachBaseContext.isAccessible = true
+        attachBaseContext.invoke(app, context)
+        app.onCreate()
+        assertThat(app.appContainer).isNotNull()
+        assertThat(app.appContainer.repository).isNotNull()
+        assertThat(app.appContainer.widgetHostGateway).isNotNull()
     }
 }

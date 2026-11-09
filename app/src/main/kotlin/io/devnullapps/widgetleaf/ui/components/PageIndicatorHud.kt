@@ -34,8 +34,10 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -141,10 +143,10 @@ fun PageIndicatorHud(
                                 .focusRequester(focusRequester)
                                 .testTag("page_label_editor_${page.pageIndex}")
                                 .onKeyEvent { keyEvent ->
-                                    if (keyEvent.key == Key.Enter) {
+                                    if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.Enter) {
                                         onCommitPageLabel(page.pageIndex, localDraft)
                                         true
-                                    } else if (keyEvent.key == Key.Escape) {
+                                    } else if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.Escape) {
                                         onCancelEditPageLabel()
                                         true
                                     } else {

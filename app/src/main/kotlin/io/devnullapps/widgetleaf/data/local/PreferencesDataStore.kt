@@ -33,8 +33,15 @@ class PreferencesDataStore(
         val KEY_PIN_TOP_BAR_RIGHT_QS_TILE = booleanPreferencesKey("pin_top_bar_right_qs_tile")
         val KEY_USE_CENTERED_BENTO_CANVAS = booleanPreferencesKey("use_centered_bento_canvas")
 
+        @Volatile
+        private var INSTANCE: PreferencesDataStore? = null
+
         fun createDataStore(context: Context): PreferencesDataStore {
-            return PreferencesDataStore(context.dataStore)
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: PreferencesDataStore(context.applicationContext.dataStore).also {
+                    INSTANCE = it
+                }
+            }
         }
 
         private fun toOverlaySettings(preferences: Preferences): OverlaySettings {

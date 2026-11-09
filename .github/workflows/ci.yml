@@ -1,0 +1,72 @@
+name: WidgetLeaf CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-verify:
+    name: Lint, Unit/Robolectric Tests, Coverage & Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run Android Lint & Play Protect Static Checks
+        run: ./gradlew lintDebug --stacktrace
+
+      - name: Run Pure JVM, Robolectric & Headless Compose Test Suite + JaCoCo Coverage
+        run: ./gradlew testDebugUnitTest jacocoTestReport --stacktrace
+
+      - name: Enforce >= 80% Line Coverage Gate
+        run: |
+          python3 - << 'EOF'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          report_path = "app/build/reports/jacoco/jacocoTestReport/jacocoTestReport.xml"
+          tree = ET.parse(report_path)
+          root = tree.getroot()
+          line_counter = None
+          for counter in root.findall("counter"):
+              if counter.attrib.get("type") == "LINE":
+                  line_counter = counter
+                  break
+          if line_counter is None:
+              print("ERROR: No LINE counter found in JaCoCo XML report.")
+              sys.exit(1)
+          missed = int(line_counter.attrib["missed"])
+          covered = int(line_counter.attrib["covered"])
+          total = missed + covered
+          pct = (covered / total * 100.0) if total > 0 else 0.0
+          print(f"Line Coverage: {covered}/{total} ({pct:.2f}%)")
+          if pct < 80.0:
+              print(f"FAILED: Line coverage {pct:.2f}% is below the 80.0% minimum threshold.")
+              sys.exit(1)
+          EOF
+
+      - name: Assemble WidgetLeaf-debug.apk
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload WidgetLeaf-debug.apk Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WidgetLeaf-debug-apk
+          path: app/build/outputs/apk/debug/WidgetLeaf-debug.apk
+          if-no-files-found: error

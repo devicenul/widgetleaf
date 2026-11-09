@@ -13,6 +13,7 @@
     <string name="shortcut_add_widget_desc">Open widget picker to place a new widget on the deck</string>
 
     <!-- Quick Settings & BentoBar Tile -->
+    <string name="qs_tile_label">Widget Deck</string>
     <string name="tile_widget_deck_label">Widget Deck</string>
     <string name="tile_widget_deck_subtitle">Toggle Overlay</string>
     <string name="tile_widget_deck_active">Active</string>

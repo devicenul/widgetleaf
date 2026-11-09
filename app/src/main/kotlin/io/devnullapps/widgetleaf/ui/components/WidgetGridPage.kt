@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -98,7 +99,9 @@ fun WidgetGridPage(
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()
-                        if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                        if (event.type == PointerEventType.Press &&
+                            (event.buttons.isSecondaryPressed || event.keyboardModifiers.isCtrlPressed)
+                        ) {
                             val pos = event.changes.firstOrNull()?.position ?: Offset.Zero
                             onOpenContextMenu(Pair(pos.x, pos.y))
                         }
@@ -197,9 +200,10 @@ fun WidgetGridPage(
                                             val edgeThresholdPx = with(density) { 48.dp.toPx() }
 
                                             if (currentLeftPx < edgeThresholdPx) {
-                                                onDragAcrossEdge(widget.appWidgetId, EdgeDirection.LEFT, targetCellX, targetCellY)
+                                                val landingX = (gridProfile.columns - widget.spanX).coerceAtLeast(0)
+                                                onDragAcrossEdge(widget.appWidgetId, EdgeDirection.LEFT, landingX, targetCellY)
                                             } else if (currentRightPx > screenWidthPx - edgeThresholdPx) {
-                                                onDragAcrossEdge(widget.appWidgetId, EdgeDirection.RIGHT, targetCellX, targetCellY)
+                                                onDragAcrossEdge(widget.appWidgetId, EdgeDirection.RIGHT, 0, targetCellY)
                                             } else {
                                                 onMoveWidget(widget.appWidgetId, targetCellX, targetCellY)
                                             }

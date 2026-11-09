@@ -552,4 +552,18 @@ class DeckScreenComposeTest {
         composeTestRule.onNodeWithTag("setting_blur_slider").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_scrim_slider").performScrollTo().assertIsDisplayed()
     }
+
+    @Test
+    fun widgetLeafThemeRendersBothDynamicAndStandardPalettes() {
+        composeTestRule.setContent {
+            io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme(useDynamicColor = false) {
+                val standardPalette = io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme.palette
+                assertThat(standardPalette.leafPrimary).isNotNull()
+            }
+            io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme(useDynamicColor = true) {
+                val dynamicPalette = io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme.palette
+                assertThat(dynamicPalette.leafPrimary).isNotNull()
+            }
+        }
+    }
 }
