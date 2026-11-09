@@ -321,6 +321,13 @@ class DeckViewModelTest {
         assertEquals(3, updated.spanY)
         assertTrue(fakeGateway.updatedSizes.containsKey(10))
 
+        // Even if widget originally had restrictive maxSpanY=2 in DB, user can resize up to profile.rows
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 8, rows = 6))
+        viewModel.moveOrResizeWidget(10, newCellX = 0, newCellY = 0, newSpanX = 4, newSpanY = 6)
+        val stretched = viewModel.uiState.value.widgets.first()
+        assertEquals(4, stretched.spanX)
+        assertEquals(6, stretched.spanY)
+
         viewModel.exitWidgetEditMode()
         assertNull(viewModel.uiState.value.editingWidgetId)
     }

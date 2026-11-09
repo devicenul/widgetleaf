@@ -470,8 +470,8 @@ class DeckViewModel(
     ) {
         val current = _uiState.value.widgets.find { it.appWidgetId == appWidgetId } ?: return
         val profile = _uiState.value.gridProfile
-        val clampedSpanX = newSpanX.coerceIn(current.minSpanX, current.maxSpanX).coerceIn(1, profile.columns)
-        val clampedSpanY = newSpanY.coerceIn(current.minSpanY, current.maxSpanY).coerceIn(1, profile.rows)
+        val clampedSpanX = newSpanX.coerceIn(1, profile.columns)
+        val clampedSpanY = newSpanY.coerceIn(1, profile.rows)
         val clampedCellX = newCellX.coerceIn(0, profile.columns - clampedSpanX)
         val clampedCellY = newCellY.coerceIn(0, profile.rows - clampedSpanY)
 
@@ -479,7 +479,11 @@ class DeckViewModel(
             cellX = clampedCellX,
             cellY = clampedCellY,
             spanX = clampedSpanX,
-            spanY = clampedSpanY
+            spanY = clampedSpanY,
+            minSpanX = 1,
+            minSpanY = 1,
+            maxSpanX = maxOf(current.maxSpanX, profile.columns),
+            maxSpanY = maxOf(current.maxSpanY, profile.rows)
         )
 
         val pageWidgets = _uiState.value.widgets.filter { it.pageIndex == current.pageIndex }
@@ -676,6 +680,17 @@ class DeckViewModel(
 
     fun updateGridProfile(profile: DesktopGridProfile) {
         _uiState.update { it.copy(gridProfile = profile) }
+        for (w in _uiState.value.widgets) {
+            val sizes = calculateResponsiveSizesUseCase(w.spanX, w.spanY, profile)
+            widgetHostGateway.updateAppWidgetSizes(
+                appWidgetId = w.appWidgetId,
+                sizesDp = sizes.responsiveSizes,
+                minWidthDp = sizes.minWidthDp,
+                minHeightDp = sizes.minHeightDp,
+                maxWidthDp = sizes.maxWidthDp,
+                maxHeightDp = sizes.maxHeightDp
+            )
+        }
     }
 
     fun refreshCatalog() {

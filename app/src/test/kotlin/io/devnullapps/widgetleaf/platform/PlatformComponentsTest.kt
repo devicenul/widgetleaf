@@ -39,7 +39,7 @@ class PlatformComponentsTest {
     // --- DesktopGridProfileResolver Tests ---
 
     @Test
-    fun desktopGridProfileResolverResolvesStandard1440x900To8x4() {
+    fun desktopGridProfileResolverResolvesStandard1440x900To8x6FittedCanvas() {
         val profile = DesktopGridProfileResolver.resolve(
             screenWidthDp = 1440f,
             screenHeightDp = 900f,
@@ -47,18 +47,18 @@ class PlatformComponentsTest {
         )
 
         assertThat(profile.columns).isEqualTo(8)
-        assertThat(profile.rows).isEqualTo(4)
-        assertThat(profile.cellWidthDp).isEqualTo(140f)
-        assertThat(profile.cellHeightDp).isEqualTo(140f)
+        assertThat(profile.rows).isEqualTo(6)
         assertThat(profile.gutterDp).isEqualTo(16f)
-        assertThat(profile.marginDp).isEqualTo(48f)
+        assertThat(profile.marginDp).isEqualTo(36f)
         assertThat(profile.maxCanvasWidthDp).isEqualTo(1440f)
         assertThat(profile.availableWidthDp).isEqualTo(1440f)
         assertThat(profile.availableHeightDp).isEqualTo(900f)
+        // Spanning all 6 rows fills usableHeightDp (900 - 36 - 84 = 780dp)
+        assertThat(profile.heightDpForSpan(profile.rows)).isWithin(0.5f).of(780f)
     }
 
     @Test
-    fun desktopGridProfileResolverEnsuresMinimum4ColumnsAnd3RowsOnSmallerWindows() {
+    fun desktopGridProfileResolverEnsuresMinimum4ColumnsAnd4RowsOnSmallerWindows() {
         val smallProfile = DesktopGridProfileResolver.resolve(
             screenWidthDp = 500f,
             screenHeightDp = 400f,
@@ -66,7 +66,7 @@ class PlatformComponentsTest {
         )
 
         assertThat(smallProfile.columns).isEqualTo(4)
-        assertThat(smallProfile.rows).isEqualTo(3)
+        assertThat(smallProfile.rows).isEqualTo(4)
     }
 
     @Test
@@ -77,9 +77,9 @@ class PlatformComponentsTest {
             useCenteredBentoCanvas = true
         )
 
-        // With centered canvas, width is capped at 1440dp -> 8 columns
+        // With centered canvas, width is capped at 1440dp -> 8 columns, 8 rows
         assertThat(wideProfileCentered.columns).isEqualTo(8)
-        assertThat(wideProfileCentered.rows).isEqualTo(5)
+        assertThat(wideProfileCentered.rows).isEqualTo(8)
 
         val wideProfileUncapped = DesktopGridProfileResolver.resolve(
             screenWidthDp = 2560f,
@@ -87,9 +87,9 @@ class PlatformComponentsTest {
             useCenteredBentoCanvas = false
         )
 
-        // Usable width: 2560 - 96 = 2464. (2464 + 16) / 156 = 15 columns
-        assertThat(wideProfileUncapped.columns).isEqualTo(15)
-        assertThat(wideProfileUncapped.rows).isEqualTo(5)
+        // Usable width: 2560 - 72 = 2488. (2488 + 16) / 156 = 16 columns
+        assertThat(wideProfileUncapped.columns).isEqualTo(16)
+        assertThat(wideProfileUncapped.rows).isEqualTo(8)
     }
 
     // --- BlurController Tests ---

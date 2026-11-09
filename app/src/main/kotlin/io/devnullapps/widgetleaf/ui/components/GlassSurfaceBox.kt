@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -23,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -129,6 +132,7 @@ fun WidgetEditResizeFrame(
     onResizeWidget: (newCellX: Int, newCellY: Int, newSpanX: Int, newSpanY: Int) -> Unit,
     onRemoveWidget: (appWidgetId: Int) -> Unit,
     onReconfigureWidget: ((appWidgetId: Int) -> Unit)? = null,
+    onResizePreviewChange: (leftDeltaPx: Float, topDeltaPx: Float, rightDeltaPx: Float, bottomDeltaPx: Float) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier
 ) {
     if (!isEditing) return
@@ -137,6 +141,13 @@ fun WidgetEditResizeFrame(
     val density = LocalDensity.current
     val cellStepXPx = with(density) { (gridProfile.cellWidthDp + gridProfile.gutterDp).dp.toPx() }
     val cellStepYPx = with(density) { (gridProfile.cellHeightDp + gridProfile.gutterDp).dp.toPx() }
+
+    val currentWidget by rememberUpdatedState(widget)
+    val currentGridProfile by rememberUpdatedState(gridProfile)
+    val currentStepXPx by rememberUpdatedState(cellStepXPx)
+    val currentStepYPx by rememberUpdatedState(cellStepYPx)
+    val currentOnResizeWidget by rememberUpdatedState(onResizeWidget)
+    val currentOnResizePreviewChange by rememberUpdatedState(onResizePreviewChange)
 
     val verticalResizeIcon = rememberSystemPointerIcon(
         context,
@@ -233,33 +244,44 @@ fun WidgetEditResizeFrame(
             }
         }
 
-        // Top drag handle (88x28dp grab zone with ↕ resize cursor)
+        // Top drag handle (full top edge grab zone with ↕ resize cursor)
         var topDragY by remember { mutableFloatStateOf(0f) }
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .size(width = 88.dp, height = 28.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .height(28.dp)
                 .pointerHoverIcon(verticalResizeIcon)
                 .testTag("resize_handle_top_${widget.appWidgetId}")
-                .pointerInput(widget.appWidgetId, widget.cellY, widget.spanY) {
+                .pointerInput(widget.appWidgetId) {
                     detectDragGestures(
-                        onDragStart = { topDragY = 0f },
+                        onDragStart = {
+                            topDragY = 0f
+                            currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                        },
                         onDrag = { change, dragAmount ->
                             change.consume()
                             topDragY += dragAmount.y
+                            currentOnResizePreviewChange(0f, topDragY, 0f, 0f)
+                        },
+                        onDragCancel = {
+                            topDragY = 0f
+                            currentOnResizePreviewChange(0f, 0f, 0f, 0f)
                         },
                         onDragEnd = {
-                            val cellDelta = (topDragY / cellStepYPx).roundToInt()
-                            val newCellY = (widget.cellY + cellDelta).coerceIn(
-                                0,
-                                (widget.cellY + widget.spanY - widget.minSpanY).coerceAtLeast(0)
+                            val w = currentWidget
+                            val prof = currentGridProfile
+                            val cellDelta = (topDragY / currentStepYPx).roundToInt()
+                            val maxTopCellY = (w.cellY + w.spanY - 1).coerceAtLeast(0)
+                            val newCellY = (w.cellY + cellDelta).coerceIn(0, maxTopCellY)
+                            val newSpanY = (w.spanY - (newCellY - w.cellY)).coerceIn(
+                                1,
+                                (prof.rows - newCellY).coerceAtLeast(1)
                             )
-                            val newSpanY = (widget.spanY - (newCellY - widget.cellY)).coerceIn(
-                                widget.minSpanY,
-                                widget.maxSpanY
-                            )
-                            onResizeWidget(widget.cellX, newCellY, widget.spanX, newSpanY)
                             topDragY = 0f
+                            currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                            currentOnResizeWidget(w.cellX, newCellY, w.spanX, newSpanY)
                         }
                     )
                 },
@@ -268,36 +290,47 @@ fun WidgetEditResizeFrame(
             Box(
                 modifier = Modifier
                     .padding(top = 3.dp)
-                    .size(width = 48.dp, height = 8.dp)
+                    .size(width = 56.dp, height = 8.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(WidgetLeafTheme.palette.leafBright)
                     .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(4.dp))
             )
         }
 
-        // Bottom drag handle (88x28dp grab zone with ↕ resize cursor)
+        // Bottom drag handle (full bottom edge grab zone with ↕ resize cursor)
         var bottomDragY by remember { mutableFloatStateOf(0f) }
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .size(width = 88.dp, height = 28.dp)
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .height(28.dp)
                 .pointerHoverIcon(verticalResizeIcon)
                 .testTag("resize_handle_bottom_${widget.appWidgetId}")
-                .pointerInput(widget.appWidgetId, widget.cellY, widget.spanY) {
+                .pointerInput(widget.appWidgetId) {
                     detectDragGestures(
-                        onDragStart = { bottomDragY = 0f },
+                        onDragStart = {
+                            bottomDragY = 0f
+                            currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                        },
                         onDrag = { change, dragAmount ->
                             change.consume()
                             bottomDragY += dragAmount.y
+                            currentOnResizePreviewChange(0f, 0f, 0f, bottomDragY)
+                        },
+                        onDragCancel = {
+                            bottomDragY = 0f
+                            currentOnResizePreviewChange(0f, 0f, 0f, 0f)
                         },
                         onDragEnd = {
-                            val cellDelta = (bottomDragY / cellStepYPx).roundToInt()
-                            val newSpanY = (widget.spanY + cellDelta).coerceIn(
-                                widget.minSpanY,
-                                widget.maxSpanY
-                            )
-                            onResizeWidget(widget.cellX, widget.cellY, widget.spanX, newSpanY)
+                            val w = currentWidget
+                            val prof = currentGridProfile
+                            val cellDelta = (bottomDragY / currentStepYPx).roundToInt()
+                            val maxAvailableSpanY = (prof.rows - w.cellY).coerceAtLeast(1)
+                            val newSpanY = (w.spanY + cellDelta).coerceIn(1, maxAvailableSpanY)
                             bottomDragY = 0f
+                            currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                            currentOnResizeWidget(w.cellX, w.cellY, w.spanX, newSpanY)
                         }
                     )
                 },
@@ -306,40 +339,51 @@ fun WidgetEditResizeFrame(
             Box(
                 modifier = Modifier
                     .padding(bottom = 3.dp)
-                    .size(width = 48.dp, height = 8.dp)
+                    .size(width = 56.dp, height = 8.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(WidgetLeafTheme.palette.leafBright)
                     .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(4.dp))
             )
         }
 
-        // Left drag handle (28x88dp grab zone with ↔ resize cursor)
+        // Left drag handle (full left edge grab zone with ↔ resize cursor)
         var leftDragX by remember { mutableFloatStateOf(0f) }
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .size(width = 28.dp, height = 88.dp)
+                .fillMaxHeight()
+                .padding(vertical = 24.dp)
+                .width(28.dp)
                 .pointerHoverIcon(horizontalResizeIcon)
                 .testTag("resize_handle_left_${widget.appWidgetId}")
-                .pointerInput(widget.appWidgetId, widget.cellX, widget.spanX) {
+                .pointerInput(widget.appWidgetId) {
                     detectDragGestures(
-                        onDragStart = { leftDragX = 0f },
+                        onDragStart = {
+                            leftDragX = 0f
+                            currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                        },
                         onDrag = { change, dragAmount ->
                             change.consume()
                             leftDragX += dragAmount.x
+                            currentOnResizePreviewChange(leftDragX, 0f, 0f, 0f)
+                        },
+                        onDragCancel = {
+                            leftDragX = 0f
+                            currentOnResizePreviewChange(0f, 0f, 0f, 0f)
                         },
                         onDragEnd = {
-                            val cellDelta = (leftDragX / cellStepXPx).roundToInt()
-                            val newCellX = (widget.cellX + cellDelta).coerceIn(
-                                0,
-                                (widget.cellX + widget.spanX - widget.minSpanX).coerceAtLeast(0)
+                            val w = currentWidget
+                            val prof = currentGridProfile
+                            val cellDelta = (leftDragX / currentStepXPx).roundToInt()
+                            val maxLeftCellX = (w.cellX + w.spanX - 1).coerceAtLeast(0)
+                            val newCellX = (w.cellX + cellDelta).coerceIn(0, maxLeftCellX)
+                            val newSpanX = (w.spanX - (newCellX - w.cellX)).coerceIn(
+                                1,
+                                (prof.columns - newCellX).coerceAtLeast(1)
                             )
-                            val newSpanX = (widget.spanX - (newCellX - widget.cellX)).coerceIn(
-                                widget.minSpanX,
-                                widget.maxSpanX
-                            )
-                            onResizeWidget(newCellX, widget.cellY, newSpanX, widget.spanY)
                             leftDragX = 0f
+                            currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                            currentOnResizeWidget(newCellX, w.cellY, newSpanX, w.spanY)
                         }
                     )
                 },
@@ -348,36 +392,47 @@ fun WidgetEditResizeFrame(
             Box(
                 modifier = Modifier
                     .padding(start = 3.dp)
-                    .size(width = 8.dp, height = 48.dp)
+                    .size(width = 8.dp, height = 56.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(WidgetLeafTheme.palette.leafBright)
                     .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(4.dp))
             )
         }
 
-        // Right drag handle (28x88dp grab zone with ↔ resize cursor)
+        // Right drag handle (full right edge grab zone with ↔ resize cursor)
         var rightDragX by remember { mutableFloatStateOf(0f) }
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .size(width = 28.dp, height = 88.dp)
+                .fillMaxHeight()
+                .padding(vertical = 24.dp)
+                .width(28.dp)
                 .pointerHoverIcon(horizontalResizeIcon)
                 .testTag("resize_handle_right_${widget.appWidgetId}")
-                .pointerInput(widget.appWidgetId, widget.cellX, widget.spanX) {
+                .pointerInput(widget.appWidgetId) {
                     detectDragGestures(
-                        onDragStart = { rightDragX = 0f },
+                        onDragStart = {
+                            rightDragX = 0f
+                            currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                        },
                         onDrag = { change, dragAmount ->
                             change.consume()
                             rightDragX += dragAmount.x
+                            currentOnResizePreviewChange(0f, 0f, rightDragX, 0f)
+                        },
+                        onDragCancel = {
+                            rightDragX = 0f
+                            currentOnResizePreviewChange(0f, 0f, 0f, 0f)
                         },
                         onDragEnd = {
-                            val cellDelta = (rightDragX / cellStepXPx).roundToInt()
-                            val newSpanX = (widget.spanX + cellDelta).coerceIn(
-                                widget.minSpanX,
-                                widget.maxSpanX
-                            )
-                            onResizeWidget(widget.cellX, widget.cellY, newSpanX, widget.spanY)
+                            val w = currentWidget
+                            val prof = currentGridProfile
+                            val cellDelta = (rightDragX / currentStepXPx).roundToInt()
+                            val maxAvailableSpanX = (prof.columns - w.cellX).coerceAtLeast(1)
+                            val newSpanX = (w.spanX + cellDelta).coerceIn(1, maxAvailableSpanX)
                             rightDragX = 0f
+                            currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                            currentOnResizeWidget(w.cellX, w.cellY, newSpanX, w.spanY)
                         }
                     )
                 },
@@ -386,7 +441,7 @@ fun WidgetEditResizeFrame(
             Box(
                 modifier = Modifier
                     .padding(end = 3.dp)
-                    .size(width = 8.dp, height = 48.dp)
+                    .size(width = 8.dp, height = 56.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(WidgetLeafTheme.palette.leafBright)
                     .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(4.dp))

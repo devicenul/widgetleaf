@@ -72,7 +72,7 @@ open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
 
         if (interactionMode == HostInteractionMode.EDIT_MODE) {
             cancelLongPressTimer()
-            return super.dispatchTouchEvent(event)
+            return false
         }
 
         // INTERACTIVE mode handling

@@ -8,14 +8,14 @@ import io.devnullapps.widgetleaf.domain.model.DesktopGridProfile
 object DesktopGridProfileResolver {
 
     const val DEFAULT_CELL_WIDTH_DP = 140f
-    const val DEFAULT_CELL_HEIGHT_DP = 140f
+    const val DEFAULT_CELL_HEIGHT_DP = 100f
     const val DEFAULT_GUTTER_DP = 16f
-    const val DEFAULT_MARGIN_DP = 48f
+    const val DEFAULT_MARGIN_DP = 36f
     const val MAX_CANVAS_WIDTH_DP = 1440f
-    const val VERTICAL_RESERVED_DP = 128f
+    const val VERTICAL_RESERVED_DP = 84f
 
     const val MIN_COLUMNS = 4
-    const val MIN_ROWS = 3
+    const val MIN_ROWS = 4
 
     fun resolve(
         screenWidthDp: Float,
@@ -28,19 +28,21 @@ object DesktopGridProfileResolver {
             screenWidthDp
         }
 
-        val usableWidthDp = effectiveCanvasWidthDp - (2 * DEFAULT_MARGIN_DP)
+        val usableWidthDp = (effectiveCanvasWidthDp - (2 * DEFAULT_MARGIN_DP)).coerceAtLeast(MIN_COLUMNS * 80f)
         val rawColumns = ((usableWidthDp + DEFAULT_GUTTER_DP) / (DEFAULT_CELL_WIDTH_DP + DEFAULT_GUTTER_DP)).toInt()
         val columns = rawColumns.coerceAtLeast(MIN_COLUMNS)
+        val fittedCellWidthDp = ((usableWidthDp - (columns - 1) * DEFAULT_GUTTER_DP) / columns).coerceAtLeast(80f)
 
-        val usableHeightDp = screenHeightDp - (2 * DEFAULT_MARGIN_DP) - VERTICAL_RESERVED_DP
+        val usableHeightDp = (screenHeightDp - DEFAULT_MARGIN_DP - VERTICAL_RESERVED_DP).coerceAtLeast(MIN_ROWS * 72f)
         val rawRows = ((usableHeightDp + DEFAULT_GUTTER_DP) / (DEFAULT_CELL_HEIGHT_DP + DEFAULT_GUTTER_DP)).toInt()
         val rows = rawRows.coerceAtLeast(MIN_ROWS)
+        val fittedCellHeightDp = ((usableHeightDp - (rows - 1) * DEFAULT_GUTTER_DP) / rows).coerceAtLeast(72f)
 
         return DesktopGridProfile(
             columns = columns,
             rows = rows,
-            cellWidthDp = DEFAULT_CELL_WIDTH_DP,
-            cellHeightDp = DEFAULT_CELL_HEIGHT_DP,
+            cellWidthDp = fittedCellWidthDp,
+            cellHeightDp = fittedCellHeightDp,
             gutterDp = DEFAULT_GUTTER_DP,
             marginDp = DEFAULT_MARGIN_DP,
             maxCanvasWidthDp = MAX_CANVAS_WIDTH_DP,

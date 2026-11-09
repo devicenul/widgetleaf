@@ -329,25 +329,50 @@ fun WidgetGridPage(
                 var moveDragY by remember(widget.appWidgetId, widget.cellX, widget.cellY) {
                     mutableFloatStateOf(0f)
                 }
+                var resizeLeftPx by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
+                var resizeTopPx by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
+                var resizeRightPx by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
+                var resizeBottomPx by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
+
+                val resizeLeftDp = with(density) { resizeLeftPx.toDp() }
+                val resizeTopDp = with(density) { resizeTopPx.toDp() }
+                val resizeRightDp = with(density) { resizeRightPx.toDp() }
+                val resizeBottomDp = with(density) { resizeBottomPx.toDp() }
+
+                val effectiveWidthDp = if (isEditing) {
+                    (widthDp + resizeRightDp - resizeLeftDp).coerceAtLeast(64.dp)
+                } else {
+                    widthDp
+                }
+                val effectiveHeightDp = if (isEditing) {
+                    (heightDp + resizeBottomDp - resizeTopDp).coerceAtLeast(64.dp)
+                } else {
+                    heightDp
+                }
+
+                val currentWidgetState by rememberUpdatedState(widget)
 
                 Box(
                     modifier = Modifier
                         .offset(x = leftDp, y = topDp)
                         .offset {
                             if (isEditing) {
-                                IntOffset(moveDragX.roundToInt(), moveDragY.roundToInt())
+                                IntOffset(
+                                    (moveDragX + resizeLeftPx).roundToInt(),
+                                    (moveDragY + resizeTopPx).roundToInt()
+                                )
                             } else {
                                 IntOffset.Zero
                             }
                         }
-                        .size(width = widthDp, height = heightDp)
+                        .size(width = effectiveWidthDp, height = effectiveHeightDp)
                         .alpha(animatedAlpha.value)
                         .testTag("placed_widget_${widget.appWidgetId}")
                         .then(
                             if (isEditing) {
                                 Modifier
                                     .pointerHoverIcon(movePointerIcon)
-                                    .pointerInput(widget.appWidgetId, widget.cellX, widget.cellY, widget.spanX, widget.spanY) {
+                                    .pointerInput(widget.appWidgetId) {
                                         detectDragGestures(
                                             onDragStart = {
                                                 lastWidgetActionTimeMs = SystemClock.uptimeMillis()
@@ -360,26 +385,38 @@ fun WidgetGridPage(
                                                 moveDragX += dragAmount.x
                                                 moveDragY += dragAmount.y
                                             },
+                                            onDragCancel = {
+                                                moveDragX = 0f
+                                                moveDragY = 0f
+                                            },
                                             onDragEnd = {
                                                 lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                                                val cellDeltaX = (moveDragX / cellStepXPx).roundToInt()
-                                                val cellDeltaY = (moveDragY / cellStepYPx).roundToInt()
-                                                val targetCellX = (widget.cellX + cellDeltaX).coerceIn(0, gridProfile.columns - widget.spanX)
-                                                val targetCellY = (widget.cellY + cellDeltaY).coerceIn(0, gridProfile.rows - widget.spanY)
+                                                val w = currentWidgetState
+                                                val prof = currentGridProfile
+                                                val stepXPx = with(density) { (prof.cellWidthDp + prof.gutterDp).dp.toPx() }
+                                                val stepYPx = with(density) { (prof.cellHeightDp + prof.gutterDp).dp.toPx() }
+                                                val cellDeltaX = (moveDragX / stepXPx).roundToInt()
+                                                val cellDeltaY = (moveDragY / stepYPx).roundToInt()
+                                                val targetCellX = (w.cellX + cellDeltaX).coerceIn(0, (prof.columns - w.spanX).coerceAtLeast(0))
+                                                val targetCellY = (w.cellY + cellDeltaY).coerceIn(0, (prof.rows - w.spanY).coerceAtLeast(0))
 
                                                 // Check edge drag thresholds (dragged past screen edges)
-                                                val currentLeftPx = with(density) { leftDp.toPx() } + moveDragX
-                                                val currentRightPx = currentLeftPx + with(density) { widthDp.toPx() }
-                                                val screenWidthPx = with(density) { gridProfile.availableWidthDp.dp.toPx() }
+                                                val wLeftPx = with(density) {
+                                                    (prof.marginDp + w.cellX * (prof.cellWidthDp + prof.gutterDp)).dp.toPx()
+                                                }
+                                                val wWidthPx = with(density) { prof.widthDpForSpan(w.spanX).dp.toPx() }
+                                                val currentLeftPx = wLeftPx + moveDragX
+                                                val currentRightPx = currentLeftPx + wWidthPx
+                                                val screenWidthPx = with(density) { prof.availableWidthDp.dp.toPx() }
                                                 val edgeThresholdPx = with(density) { 48.dp.toPx() }
 
                                                 if (currentLeftPx < edgeThresholdPx) {
-                                                    val landingX = (gridProfile.columns - widget.spanX).coerceAtLeast(0)
-                                                    onDragAcrossEdge(widget.appWidgetId, EdgeDirection.LEFT, landingX, targetCellY)
+                                                    val landingX = (prof.columns - w.spanX).coerceAtLeast(0)
+                                                    onDragAcrossEdge(w.appWidgetId, EdgeDirection.LEFT, landingX, targetCellY)
                                                 } else if (currentRightPx > screenWidthPx - edgeThresholdPx) {
-                                                    onDragAcrossEdge(widget.appWidgetId, EdgeDirection.RIGHT, 0, targetCellY)
+                                                    onDragAcrossEdge(w.appWidgetId, EdgeDirection.RIGHT, 0, targetCellY)
                                                 } else {
-                                                    onMoveWidget(widget.appWidgetId, targetCellX, targetCellY)
+                                                    onMoveWidget(w.appWidgetId, targetCellX, targetCellY)
                                                 }
 
                                                 moveDragX = 0f
@@ -439,6 +476,13 @@ fun WidgetGridPage(
                         onReconfigureWidget = { id ->
                             lastWidgetActionTimeMs = SystemClock.uptimeMillis()
                             onReconfigureWidget?.invoke(id)
+                        },
+                        onResizePreviewChange = { lPx, tPx, rPx, bPx ->
+                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                            resizeLeftPx = lPx
+                            resizeTopPx = tPx
+                            resizeRightPx = rPx
+                            resizeBottomPx = bPx
                         }
                     )
                 }

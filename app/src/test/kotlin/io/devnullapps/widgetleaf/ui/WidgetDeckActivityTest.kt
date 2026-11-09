@@ -30,6 +30,20 @@ class WidgetDeckActivityTest {
         shadowAppWidgetManager.setValidWidgetProviderComponentName(true)
     }
 
+    private fun tearDownController(controller: org.robolectric.android.controller.ActivityController<WidgetDeckActivity>) {
+        try {
+            val activity = controller.get()
+            activity.setContentView(android.view.View(activity))
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        } catch (_: Throwable) {
+        }
+        try {
+            controller.pause().stop().destroy()
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        } catch (_: Throwable) {
+        }
+    }
+
     @Test
     fun launchWithOpenWidgetPickerIntent_opensWidgetPickerState() {
         val context = ApplicationProvider.getApplicationContext<Application>()
@@ -42,7 +56,7 @@ class WidgetDeckActivityTest {
             val activity = controller.get()
             assertThat(activity.viewModel.uiState.value.isWidgetPickerOpen).isTrue()
         } finally {
-            controller.pause().stop().destroy()
+            tearDownController(controller)
         }
     }
 
@@ -58,7 +72,7 @@ class WidgetDeckActivityTest {
             val activity = controller.get()
             assertThat(activity.viewModel.uiState.value.isOverlaySettingsOpen).isTrue()
         } finally {
-            controller.pause().stop().destroy()
+            tearDownController(controller)
         }
     }
 
@@ -85,7 +99,7 @@ class WidgetDeckActivityTest {
             activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ESCAPE))
             assertThat(activity.isFinishing).isTrue()
         } finally {
-            controller.pause().stop().destroy()
+            tearDownController(controller)
         }
     }
 
@@ -104,7 +118,7 @@ class WidgetDeckActivityTest {
                 appName = "TestApp",
                 widgetLabel = "Clock",
                 defaultSpanX = 8,
-                defaultSpanY = 4,
+                defaultSpanY = 8,
                 resizeMode = PlacedWidget.RESIZE_BOTH
             )
             activity.viewModel.addWidgetAutoPlace(item)
@@ -134,7 +148,7 @@ class WidgetDeckActivityTest {
             assertThat(activity.viewModel.uiState.value.editingWidgetId).isNull()
             assertThat(activity.viewModel.uiState.value.pages.size).isEqualTo(1)
         } finally {
-            controller.pause().stop().destroy()
+            tearDownController(controller)
         }
     }
 
@@ -167,7 +181,7 @@ class WidgetDeckActivityTest {
             activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_PAGE_UP))
             activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_PAGE_DOWN))
         } finally {
-            controller.pause().stop().destroy()
+            tearDownController(controller)
         }
     }
 
@@ -185,7 +199,7 @@ class WidgetDeckActivityTest {
             method.invoke(activity, toggleIntent)
             assertThat(activity.isFinishing).isTrue()
         } finally {
-            controller.pause().stop().destroy()
+            tearDownController(controller)
         }
     }
 
@@ -202,7 +216,7 @@ class WidgetDeckActivityTest {
             method.invoke(activity)
             assertThat(activity.isFinishing).isTrue()
         } finally {
-            controller.pause().stop().destroy()
+            tearDownController(controller)
         }
     }
 
@@ -250,7 +264,7 @@ class WidgetDeckActivityTest {
             assertThat(activity.viewModel.uiState.value.contextMenuPosition).isEqualTo(Pair(320f, 240f))
             assertThat(activity.isFinishing).isFalse()
         } finally {
-            controller.pause().stop().destroy()
+            tearDownController(controller)
         }
     }
 
@@ -302,7 +316,7 @@ class WidgetDeckActivityTest {
             assertThat(activity.viewModel.uiState.value.editingWidgetId).isEqualTo(placed.appWidgetId)
             assertThat(activity.viewModel.uiState.value.contextMenuPosition).isNull()
         } finally {
-            controller.pause().stop().destroy()
+            tearDownController(controller)
         }
     }
 
