@@ -34,6 +34,14 @@
   - In `WidgetGridPage.kt`, the root canvas gesture detector must check `findWidgetAtPosition(downPos)` and `currentEditingWidgetId == null` before calling `onOpenContextMenu`.
   - Keep the `Reconfigure | Remove` pill centered (`Alignment.Center`) inside `WidgetEditResizeFrame` so it never extends above the top of top-row widgets or overlaps the top status bar.
 
+### INV-11: Edit-Mode Move Overlay Sits Above `AndroidView` & Root Detector Must Not Consume Widget Touches
+- **Why:** In Jetpack Compose, an `AndroidView` (`DeckAppWidgetHostView` or child views in the remote widget layout) claims touch streams when `dispatchTouchEvent` returns true, causing parent `detectDragGestures` to see consumption and immediately cancel. Furthermore, if the root canvas gesture detector marks `event.changes.forEach { it.consume() }` upon entering edit mode on a widget, subsequent move events in that gesture are killed.
+- **Rule:**
+  1. In `WidgetGridPage.kt`, placed widgets must render their editing surface in a dedicated hit layer (`testTag("placed_widget_$id")`) drawn **above** the `AndroidView` in z-order, with `pointerInput(widget.appWidgetId, true) { detectDragGestures(...) }` residing on an un-translated static Box (respecting INV-2).
+  2. `WidgetEditResizeFrame` resides inside this editing layer, translated by live visual drag offset so handles and action pill follow the drag, while edge resize handles consume touches before the move drag.
+  3. When long-press timeout triggers on a placed widget in the root canvas detector, it must **never** consume subsequent changes or set `contextMenuOrEditTriggered = true`, allowing the user to seamlessly drag the widget immediately without lifting their finger.
+  4. `DeckAppWidgetHostView` must reset `isLongPressTriggered = false` on `interactionMode = EDIT_MODE`, `ACTION_UP`, and `ACTION_CANCEL`, ensuring it never gets stuck in `return true`.
+
 ---
 
 ## 2. Overlay Dismissal & Lifecycle Invariants

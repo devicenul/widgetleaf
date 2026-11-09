@@ -1,10 +1,13 @@
 package io.devnullapps.widgetleaf.ui
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -544,6 +547,24 @@ class DeckScreenComposeTest {
                 },
                 onDragAcrossEdge = { _, direction, _, _ ->
                     bumpedDirection = direction
+                },
+                onEnterEditMode = { id ->
+                    currentEditingId = id
+                },
+                widgetContent = { placed ->
+                    androidx.compose.ui.viewinterop.AndroidView(
+                        factory = { ctx ->
+                            object : android.view.View(ctx) {
+                                override fun dispatchTouchEvent(event: android.view.MotionEvent?): Boolean {
+                                    return true
+                                }
+                                override fun onTouchEvent(event: android.view.MotionEvent?): Boolean {
+                                    return true
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
             )
         }

@@ -29,6 +29,13 @@ open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
     }
 
     var interactionMode: HostInteractionMode = HostInteractionMode.INTERACTIVE
+        set(value) {
+            field = value
+            if (value == HostInteractionMode.EDIT_MODE) {
+                cancelLongPressTimer()
+                isLongPressTriggered = false
+            }
+        }
 
     var onEnterEditModeListener: ((appWidgetId: Int, rawX: Float, rawY: Float) -> Unit)? = null
     var onHorizontalPageScrollListener: ((delta: Float) -> Unit)? = null
@@ -97,7 +104,9 @@ open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
             }
             MotionEvent.ACTION_UP -> {
                 cancelLongPressTimer()
-                if (!isLongPressTriggered) {
+                val wasLongPress = isLongPressTriggered
+                isLongPressTriggered = false
+                if (!wasLongPress) {
                     val dx = event.x - downX
                     val dy = event.y - downY
                     if (dx * dx + dy * dy <= slop * slop) {
@@ -108,6 +117,7 @@ open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
             }
             MotionEvent.ACTION_CANCEL -> {
                 cancelLongPressTimer()
+                isLongPressTriggered = false
             }
         }
 

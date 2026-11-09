@@ -357,6 +357,11 @@ class WidgetDeckActivity : ComponentActivity() {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
+                    this.interactionMode = if (isEditing) {
+                        DeckAppWidgetHostView.HostInteractionMode.EDIT_MODE
+                    } else {
+                        DeckAppWidgetHostView.HostInteractionMode.INTERACTIVE
+                    }
                     onEnterEditModeListener = { id, _, _ ->
                         viewModel.enterWidgetEditMode(id)
                     }

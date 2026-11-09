@@ -51,4 +51,5 @@ Pure Kotlin models and deterministic use cases with zero Android UI dependencies
 - **`WidgetGridPage` & `WidgetEditResizeFrame` (`GlassSurfaceBox.kt`):**
   - Renders frameless widgets on the Bento grid.
   - Handles canvas-level vs. widget-level right-click / two-finger click / long-press detection.
+  - Uses a dedicated z-order hit overlay in edit mode (`testTag("placed_widget_$id")`) drawn above `AndroidView` to guarantee Move drags are never claimed or cancelled by remote view touch dispatch.
   - Renders the emerald edit frame, centered `Reconfigure | Remove` action pill, and 4 edge resize handles with live resize preview and native desktop resize cursors (`TYPE_VERTICAL_DOUBLE_ARROW`, `TYPE_HORIZONTAL_DOUBLE_ARROW`, `TYPE_ALL_SCROLL`).

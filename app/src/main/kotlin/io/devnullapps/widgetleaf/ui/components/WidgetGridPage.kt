@@ -29,9 +29,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.PointerInputChange
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerHoverIcon
@@ -176,12 +179,14 @@ fun WidgetGridPage(
                         if (event == null) {
                             // Long-press timeout reached while finger still down
                             val pos = firstDownPos ?: Offset.Zero
-                            contextMenuOrEditTriggered = true
                             val targetWidget = hitWidgetOnDown ?: findWidgetAtPosition(pos)
                             if (targetWidget != null) {
                                 lastWidgetActionTimeMs = SystemClock.uptimeMillis()
                                 currentOnEnterEditMode(targetWidget.appWidgetId)
+                                // Do not mark contextMenuOrEditTriggered or consume events:
+                                // allow the user to drag the widget in the same continuous gesture.
                             } else if (currentEditingWidgetId == null) {
+                                contextMenuOrEditTriggered = true
                                 lastContextMenuOpenTimeMs = SystemClock.uptimeMillis()
                                 currentOnOpenContextMenu(Pair(pos.x, pos.y))
                             }
@@ -342,79 +347,10 @@ fun WidgetGridPage(
                         .offset(x = leftDp, y = topDp)
                         .size(width = widthDp, height = heightDp)
                         .alpha(animatedAlpha.value)
-                        .testTag("placed_widget_${widget.appWidgetId}")
                         .then(
-                            if (isEditing) {
+                            if (!isEditing) {
                                 Modifier
-                                    .pointerHoverIcon(movePointerIcon)
-                                    .pointerInput(widget.appWidgetId, true) {
-                                        detectDragGestures(
-                                            onDragStart = { startOffset ->
-                                                lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                                                moveDragX = 0f
-                                                moveDragY = 0f
-                                                lastDragPointerInWidgetX = startOffset.x
-                                            },
-                                            onDrag = { change, dragAmount ->
-                                                change.consume()
-                                                lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                                                moveDragX += dragAmount.x
-                                                moveDragY += dragAmount.y
-                                                lastDragPointerInWidgetX = change.position.x
-                                            },
-                                            onDragCancel = {
-                                                moveDragX = 0f
-                                                moveDragY = 0f
-                                            },
-                                            onDragEnd = {
-                                                lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                                                val w = currentWidgetState
-                                                val prof = currentGridProfile
-                                                val stepXPx = with(density) { (prof.cellWidthDp + prof.gutterDp).dp.toPx() }
-                                                val stepYPx = with(density) { (prof.cellHeightDp + prof.gutterDp).dp.toPx() }
-                                                val cellDeltaX = (moveDragX / stepXPx).roundToInt()
-                                                val cellDeltaY = (moveDragY / stepYPx).roundToInt()
-                                                val targetCellX = (w.cellX + cellDeltaX).coerceIn(0, (prof.columns - w.spanX).coerceAtLeast(0))
-                                                val targetCellY = (w.cellY + cellDeltaY).coerceIn(0, (prof.rows - w.spanY).coerceAtLeast(0))
-
-                                                // Check edge drag thresholds (dragged past grid or screen edges)
-                                                val gridLeftPx = with(density) { prof.marginDp.dp.toPx() }
-                                                val gridRightPx = with(density) {
-                                                    (prof.marginDp + prof.widthDpForSpan(prof.columns)).dp.toPx()
-                                                }
-                                                val wLeftPx = with(density) {
-                                                    (prof.marginDp + w.cellX * (prof.cellWidthDp + prof.gutterDp)).dp.toPx()
-                                                }
-                                                val wWidthPx = with(density) { prof.widthDpForSpan(w.spanX).dp.toPx() }
-                                                val currentLeftPx = wLeftPx + moveDragX
-                                                val currentRightPx = currentLeftPx + wWidthPx
-                                                val pointerInRootX = gridOffsetInRoot + wLeftPx + lastDragPointerInWidgetX
-                                                val screenWidthPx = with(density) { prof.availableWidthDp.dp.toPx() }
-                                                val minHorizontalDragPx = with(density) { 32.dp.toPx() }
-                                                val edgeOvershootPx = with(density) { 20.dp.toPx() }
-                                                val screenEdgeZonePx = with(density) { 56.dp.toPx() }
-
-                                                val bumpedLeft = moveDragX < -minHorizontalDragPx &&
-                                                    (currentLeftPx < gridLeftPx - edgeOvershootPx || pointerInRootX < screenEdgeZonePx)
-                                                val bumpedRight = moveDragX > minHorizontalDragPx &&
-                                                    (currentRightPx > gridRightPx + edgeOvershootPx || pointerInRootX > screenWidthPx - screenEdgeZonePx)
-
-                                                if (bumpedLeft) {
-                                                    val landingX = (prof.columns - w.spanX).coerceAtLeast(0)
-                                                    currentOnDragAcrossEdge(w.appWidgetId, EdgeDirection.LEFT, landingX, targetCellY)
-                                                } else if (bumpedRight) {
-                                                    currentOnDragAcrossEdge(w.appWidgetId, EdgeDirection.RIGHT, 0, targetCellY)
-                                                } else {
-                                                    currentOnMoveWidget(w.appWidgetId, targetCellX, targetCellY)
-                                                }
-
-                                                moveDragX = 0f
-                                                moveDragY = 0f
-                                            }
-                                        )
-                                    }
-                            } else {
-                                Modifier
+                                    .testTag("placed_widget_${widget.appWidgetId}")
                                     .pointerInput(widget.appWidgetId, false) {
                                         awaitPointerEventScope {
                                             while (true) {
@@ -443,38 +379,132 @@ fun WidgetGridPage(
                                             onEnterEditMode(widget.appWidgetId)
                                         }
                                     )
+                            } else {
+                                Modifier
                             }
                         )
-                        // Visual drag translation placed AFTER pointerInput so pointer coordinate space never shifts during drag!
-                        .offset {
-                            if (isEditing) {
-                                IntOffset(moveDragX.roundToInt(), moveDragY.roundToInt())
-                            } else {
-                                IntOffset.Zero
+                ) {
+                    // Layer 1 (Bottom): Visual widget content (AndroidView)
+                    // Translated by live drag offset so it glides smoothly during drag.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .offset {
+                                if (isEditing) {
+                                    IntOffset(moveDragX.roundToInt(), moveDragY.roundToInt())
+                                } else {
+                                    IntOffset.Zero
+                                }
+                            }
+                    ) {
+                        widgetContent(widget)
+                    }
+
+                    // Layer 2 (Top, if editing): Dedicated move-drag hit surface ABOVE widgetContent!
+                    // Positioned at static grid position (no dynamic offset), strictly satisfying INV-2.
+                    // Sits above AndroidView so AndroidView never receives events in edit mode.
+                    // Contains WidgetEditResizeFrame as a child so resize handles and action pill
+                    // move with live offset while Sibling 2 remains stationary.
+                    if (isEditing) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("placed_widget_${widget.appWidgetId}")
+                                .pointerHoverIcon(movePointerIcon)
+                                .pointerInput(widget.appWidgetId, true) {
+                                    detectDragGestures(
+                                        onDragStart = { startOffset ->
+                                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                            moveDragX = 0f
+                                            moveDragY = 0f
+                                            lastDragPointerInWidgetX = startOffset.x
+                                        },
+                                        onDrag = { change, dragAmount ->
+                                            change.consume()
+                                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                            moveDragX += dragAmount.x
+                                            moveDragY += dragAmount.y
+                                            lastDragPointerInWidgetX = change.position.x
+                                        },
+                                        onDragCancel = {
+                                            moveDragX = 0f
+                                            moveDragY = 0f
+                                        },
+                                        onDragEnd = {
+                                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                            val w = currentWidgetState
+                                            val prof = currentGridProfile
+                                            val stepXPx = with(density) { (prof.cellWidthDp + prof.gutterDp).dp.toPx() }
+                                            val stepYPx = with(density) { (prof.cellHeightDp + prof.gutterDp).dp.toPx() }
+                                            val cellDeltaX = (moveDragX / stepXPx).roundToInt()
+                                            val cellDeltaY = (moveDragY / stepYPx).roundToInt()
+                                            val targetCellX = (w.cellX + cellDeltaX).coerceIn(0, (prof.columns - w.spanX).coerceAtLeast(0))
+                                            val targetCellY = (w.cellY + cellDeltaY).coerceIn(0, (prof.rows - w.spanY).coerceAtLeast(0))
+
+                                            // Check edge drag thresholds (dragged past grid or screen edges)
+                                            val gridLeftPx = with(density) { prof.marginDp.dp.toPx() }
+                                            val gridRightPx = with(density) {
+                                                (prof.marginDp + prof.widthDpForSpan(prof.columns)).dp.toPx()
+                                            }
+                                            val wLeftPx = with(density) {
+                                                (prof.marginDp + w.cellX * (prof.cellWidthDp + prof.gutterDp)).dp.toPx()
+                                            }
+                                            val wWidthPx = with(density) { prof.widthDpForSpan(w.spanX).dp.toPx() }
+                                            val currentLeftPx = wLeftPx + moveDragX
+                                            val currentRightPx = currentLeftPx + wWidthPx
+                                            val pointerInRootX = gridOffsetInRoot + wLeftPx + lastDragPointerInWidgetX
+                                            val screenWidthPx = with(density) { prof.availableWidthDp.dp.toPx() }
+                                            val minHorizontalDragPx = with(density) { 32.dp.toPx() }
+                                            val edgeOvershootPx = with(density) { 20.dp.toPx() }
+                                            val screenEdgeZonePx = with(density) { 56.dp.toPx() }
+
+                                            val bumpedLeft = moveDragX < -minHorizontalDragPx &&
+                                                (currentLeftPx < gridLeftPx - edgeOvershootPx || pointerInRootX < screenEdgeZonePx)
+                                            val bumpedRight = moveDragX > minHorizontalDragPx &&
+                                                (currentRightPx > gridRightPx + edgeOvershootPx || pointerInRootX > screenWidthPx - screenEdgeZonePx)
+
+                                            if (bumpedLeft) {
+                                                val landingX = (prof.columns - w.spanX).coerceAtLeast(0)
+                                                currentOnDragAcrossEdge(w.appWidgetId, EdgeDirection.LEFT, landingX, targetCellY)
+                                            } else if (bumpedRight) {
+                                                currentOnDragAcrossEdge(w.appWidgetId, EdgeDirection.RIGHT, 0, targetCellY)
+                                            } else {
+                                                currentOnMoveWidget(w.appWidgetId, targetCellX, targetCellY)
+                                            }
+
+                                            moveDragX = 0f
+                                            moveDragY = 0f
+                                        }
+                                    )
+                                }
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .offset {
+                                        IntOffset(moveDragX.roundToInt(), moveDragY.roundToInt())
+                                    }
+                            ) {
+                                WidgetEditResizeFrame(
+                                    widget = widget,
+                                    gridProfile = gridProfile,
+                                    isEditing = isEditing,
+                                    onResizeWidget = { newX, newY, newSpanX, newSpanY ->
+                                        lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                        onResizeWidget(widget.appWidgetId, newX, newY, newSpanX, newSpanY)
+                                    },
+                                    onRemoveWidget = { id ->
+                                        lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                        onRemoveWidget(id)
+                                    },
+                                    onReconfigureWidget = { id ->
+                                        lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                        onReconfigureWidget?.invoke(id)
+                                    }
+                                )
                             }
                         }
-                ) {
-                    // Frameless widget rendering
-                    widgetContent(widget)
-
-                    // Edit mode overlay with 4-edge handles and action pill
-                    WidgetEditResizeFrame(
-                        widget = widget,
-                        gridProfile = gridProfile,
-                        isEditing = isEditing,
-                        onResizeWidget = { newX, newY, newSpanX, newSpanY ->
-                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                            onResizeWidget(widget.appWidgetId, newX, newY, newSpanX, newSpanY)
-                        },
-                        onRemoveWidget = { id ->
-                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                            onRemoveWidget(id)
-                        },
-                        onReconfigureWidget = { id ->
-                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                            onReconfigureWidget?.invoke(id)
-                        }
-                    )
+                    }
                 }
             }
         }
