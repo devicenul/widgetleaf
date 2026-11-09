@@ -329,43 +329,18 @@ fun WidgetGridPage(
                 var moveDragY by remember(widget.appWidgetId, widget.cellX, widget.cellY) {
                     mutableFloatStateOf(0f)
                 }
-                var resizeLeftPx by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
-                var resizeTopPx by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
-                var resizeRightPx by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
-                var resizeBottomPx by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
-
-                val resizeLeftDp = with(density) { resizeLeftPx.toDp() }
-                val resizeTopDp = with(density) { resizeTopPx.toDp() }
-                val resizeRightDp = with(density) { resizeRightPx.toDp() }
-                val resizeBottomDp = with(density) { resizeBottomPx.toDp() }
-
-                val effectiveWidthDp = if (isEditing) {
-                    (widthDp + resizeRightDp - resizeLeftDp).coerceAtLeast(64.dp)
-                } else {
-                    widthDp
-                }
-                val effectiveHeightDp = if (isEditing) {
-                    (heightDp + resizeBottomDp - resizeTopDp).coerceAtLeast(64.dp)
-                } else {
-                    heightDp
+                var lastDragPointerInWidgetX by remember(widget.appWidgetId) {
+                    mutableFloatStateOf(0f)
                 }
 
                 val currentWidgetState by rememberUpdatedState(widget)
+                val currentOnMoveWidget by rememberUpdatedState(onMoveWidget)
+                val currentOnDragAcrossEdge by rememberUpdatedState(onDragAcrossEdge)
 
                 Box(
                     modifier = Modifier
                         .offset(x = leftDp, y = topDp)
-                        .offset {
-                            if (isEditing) {
-                                IntOffset(
-                                    (moveDragX + resizeLeftPx).roundToInt(),
-                                    (moveDragY + resizeTopPx).roundToInt()
-                                )
-                            } else {
-                                IntOffset.Zero
-                            }
-                        }
-                        .size(width = effectiveWidthDp, height = effectiveHeightDp)
+                        .size(width = widthDp, height = heightDp)
                         .alpha(animatedAlpha.value)
                         .testTag("placed_widget_${widget.appWidgetId}")
                         .then(
@@ -374,16 +349,18 @@ fun WidgetGridPage(
                                     .pointerHoverIcon(movePointerIcon)
                                     .pointerInput(widget.appWidgetId) {
                                         detectDragGestures(
-                                            onDragStart = {
+                                            onDragStart = { startOffset ->
                                                 lastWidgetActionTimeMs = SystemClock.uptimeMillis()
                                                 moveDragX = 0f
                                                 moveDragY = 0f
+                                                lastDragPointerInWidgetX = startOffset.x
                                             },
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 lastWidgetActionTimeMs = SystemClock.uptimeMillis()
                                                 moveDragX += dragAmount.x
                                                 moveDragY += dragAmount.y
+                                                lastDragPointerInWidgetX = change.position.x
                                             },
                                             onDragCancel = {
                                                 moveDragX = 0f
@@ -400,23 +377,35 @@ fun WidgetGridPage(
                                                 val targetCellX = (w.cellX + cellDeltaX).coerceIn(0, (prof.columns - w.spanX).coerceAtLeast(0))
                                                 val targetCellY = (w.cellY + cellDeltaY).coerceIn(0, (prof.rows - w.spanY).coerceAtLeast(0))
 
-                                                // Check edge drag thresholds (dragged past screen edges)
+                                                // Check edge drag thresholds (dragged past grid or screen edges)
+                                                val gridLeftPx = with(density) { prof.marginDp.dp.toPx() }
+                                                val gridRightPx = with(density) {
+                                                    (prof.marginDp + prof.widthDpForSpan(prof.columns)).dp.toPx()
+                                                }
                                                 val wLeftPx = with(density) {
                                                     (prof.marginDp + w.cellX * (prof.cellWidthDp + prof.gutterDp)).dp.toPx()
                                                 }
                                                 val wWidthPx = with(density) { prof.widthDpForSpan(w.spanX).dp.toPx() }
                                                 val currentLeftPx = wLeftPx + moveDragX
                                                 val currentRightPx = currentLeftPx + wWidthPx
+                                                val pointerInRootX = gridOffsetInRoot + wLeftPx + lastDragPointerInWidgetX
                                                 val screenWidthPx = with(density) { prof.availableWidthDp.dp.toPx() }
-                                                val edgeThresholdPx = with(density) { 48.dp.toPx() }
+                                                val minHorizontalDragPx = with(density) { 32.dp.toPx() }
+                                                val edgeOvershootPx = with(density) { 20.dp.toPx() }
+                                                val screenEdgeZonePx = with(density) { 56.dp.toPx() }
 
-                                                if (currentLeftPx < edgeThresholdPx) {
+                                                val bumpedLeft = moveDragX < -minHorizontalDragPx &&
+                                                    (currentLeftPx < gridLeftPx - edgeOvershootPx || pointerInRootX < screenEdgeZonePx)
+                                                val bumpedRight = moveDragX > minHorizontalDragPx &&
+                                                    (currentRightPx > gridRightPx + edgeOvershootPx || pointerInRootX > screenWidthPx - screenEdgeZonePx)
+
+                                                if (bumpedLeft) {
                                                     val landingX = (prof.columns - w.spanX).coerceAtLeast(0)
-                                                    onDragAcrossEdge(w.appWidgetId, EdgeDirection.LEFT, landingX, targetCellY)
-                                                } else if (currentRightPx > screenWidthPx - edgeThresholdPx) {
-                                                    onDragAcrossEdge(w.appWidgetId, EdgeDirection.RIGHT, 0, targetCellY)
+                                                    currentOnDragAcrossEdge(w.appWidgetId, EdgeDirection.LEFT, landingX, targetCellY)
+                                                } else if (bumpedRight) {
+                                                    currentOnDragAcrossEdge(w.appWidgetId, EdgeDirection.RIGHT, 0, targetCellY)
                                                 } else {
-                                                    onMoveWidget(w.appWidgetId, targetCellX, targetCellY)
+                                                    currentOnMoveWidget(w.appWidgetId, targetCellX, targetCellY)
                                                 }
 
                                                 moveDragX = 0f
@@ -456,6 +445,14 @@ fun WidgetGridPage(
                                     )
                             }
                         )
+                        // Visual drag translation placed AFTER pointerInput so pointer coordinate space never shifts during drag!
+                        .offset {
+                            if (isEditing) {
+                                IntOffset(moveDragX.roundToInt(), moveDragY.roundToInt())
+                            } else {
+                                IntOffset.Zero
+                            }
+                        }
                 ) {
                     // Frameless widget rendering
                     widgetContent(widget)
@@ -476,13 +473,6 @@ fun WidgetGridPage(
                         onReconfigureWidget = { id ->
                             lastWidgetActionTimeMs = SystemClock.uptimeMillis()
                             onReconfigureWidget?.invoke(id)
-                        },
-                        onResizePreviewChange = { lPx, tPx, rPx, bPx ->
-                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                            resizeLeftPx = lPx
-                            resizeTopPx = tPx
-                            resizeRightPx = rPx
-                            resizeBottomPx = bPx
                         }
                     )
                 }

@@ -16,6 +16,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeRight
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import io.devnullapps.widgetleaf.domain.model.DeckPage
@@ -489,6 +491,73 @@ class DeckScreenComposeTest {
         composeTestRule.waitForIdle()
         assertThat(removedWidgetId).isEqualTo(101)
         assertThat(overlayDismissed).isFalse()
+    }
+
+    @Test
+    fun draggingBottomResizeHandleIncreasesSpanYAndDraggingWidgetToRightEdgeTriggersPageBump() {
+        val widget = PlacedWidget(
+            appWidgetId = 101,
+            providerPackage = "io.devnullapps.calendar",
+            providerClass = "CalendarWidget",
+            pageIndex = 0,
+            cellX = 6,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            minSpanX = 2,
+            minSpanY = 2,
+            maxSpanX = 2,
+            maxSpanY = 2,
+            isReconfigurable = true,
+            label = "Calendar"
+        )
+
+        var resizedSpanY = -1
+        var bumpedDirection: io.devnullapps.widgetleaf.domain.usecase.EdgeDirection? = null
+
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = DeckUiState(
+                    widgets = listOf(widget),
+                    editingWidgetId = 101
+                ),
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                onResizeWidget = { _, _, _, _, newSpanY ->
+                    resizedSpanY = newSpanY
+                },
+                onDragAcrossEdge = { _, direction, _, _ ->
+                    bumpedDirection = direction
+                }
+            )
+        }
+
+        composeTestRule.waitForIdle()
+
+        // Drag bottom resize handle down by ~300px -> increases spanY beyond 2 even though maxSpanY was 2
+        composeTestRule.onNodeWithTag("resize_handle_bottom_101").performTouchInput {
+            swipeDown(startY = centerY, endY = centerY + 300f, durationMillis = 200)
+        }
+        composeTestRule.waitForIdle()
+        assertThat(resizedSpanY).isGreaterThan(2)
+
+        // Drag widget body from cellX=6 to the right edge -> triggers EdgeDirection.RIGHT page bump
+        composeTestRule.onNodeWithTag("placed_widget_101").performTouchInput {
+            swipeRight(startX = centerX - 40f, endX = centerX + 260f, durationMillis = 200)
+        }
+        composeTestRule.waitForIdle()
+        assertThat(bumpedDirection).isEqualTo(io.devnullapps.widgetleaf.domain.usecase.EdgeDirection.RIGHT)
     }
 
     @Test

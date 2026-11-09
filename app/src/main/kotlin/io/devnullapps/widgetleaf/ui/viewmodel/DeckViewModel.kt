@@ -527,30 +527,39 @@ class DeckViewModel(
             gridProfile = state.gridProfile
         )
 
-        if (result is EdgeTransferResult.Success) {
-            val targetIndex = result.targetPageIndex.coerceIn(0, result.pages.lastIndex)
-            _uiState.update {
-                it.copy(
-                    pages = result.pages,
-                    widgets = result.widgets,
-                    activePageIndex = targetIndex
-                )
+        when (result) {
+            is EdgeTransferResult.Success -> {
+                val targetIndex = result.targetPageIndex.coerceIn(0, result.pages.lastIndex)
+                _uiState.update {
+                    it.copy(
+                        pages = result.pages,
+                        widgets = result.widgets,
+                        activePageIndex = targetIndex
+                    )
+                }
+                viewModelScope.launch {
+                    repository.replaceDeckState(result.pages, result.widgets)
+                }
+                val transferred = result.widgets.find { it.appWidgetId == appWidgetId }
+                if (transferred != null) {
+                    val sizes = calculateResponsiveSizesUseCase(transferred.spanX, transferred.spanY, state.gridProfile)
+                    widgetHostGateway.updateAppWidgetSizes(
+                        appWidgetId = transferred.appWidgetId,
+                        sizesDp = sizes.responsiveSizes,
+                        minWidthDp = sizes.minWidthDp,
+                        minHeightDp = sizes.minHeightDp,
+                        maxWidthDp = sizes.maxWidthDp,
+                        maxHeightDp = sizes.maxHeightDp
+                    )
+                }
             }
-            viewModelScope.launch {
-                repository.replaceDeckState(result.pages, result.widgets)
+            is EdgeTransferResult.BlockedAtLeftEdge -> {
+                val current = state.widgets.find { it.appWidgetId == appWidgetId }
+                if (current != null) {
+                    moveOrResizeWidget(appWidgetId, 0, targetCellY, current.spanX, current.spanY)
+                }
             }
-            val transferred = result.widgets.find { it.appWidgetId == appWidgetId }
-            if (transferred != null) {
-                val sizes = calculateResponsiveSizesUseCase(transferred.spanX, transferred.spanY, state.gridProfile)
-                widgetHostGateway.updateAppWidgetSizes(
-                    appWidgetId = transferred.appWidgetId,
-                    sizesDp = sizes.responsiveSizes,
-                    minWidthDp = sizes.minWidthDp,
-                    minHeightDp = sizes.minHeightDp,
-                    maxWidthDp = sizes.maxWidthDp,
-                    maxHeightDp = sizes.maxHeightDp
-                )
-            }
+            is EdgeTransferResult.RejectedFullPage -> Unit
         }
     }
 

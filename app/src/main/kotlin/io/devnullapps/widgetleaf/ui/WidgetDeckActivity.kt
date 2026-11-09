@@ -617,12 +617,43 @@ class WidgetDeckActivity : ComponentActivity() {
                 when (event.keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT,
                     KeyEvent.KEYCODE_PAGE_UP -> {
-                        viewModel.navigatePreviousPage()
+                        val editingId = state.editingWidgetId
+                        val editingWidget = if (editingId != null && event.isShiftPressed) {
+                            state.widgets.find { it.appWidgetId == editingId }
+                        } else {
+                            null
+                        }
+                        if (editingWidget != null) {
+                            val landingX = (state.gridProfile.columns - editingWidget.spanX).coerceAtLeast(0)
+                            viewModel.dragWidgetAcrossEdge(
+                                editingWidget.appWidgetId,
+                                io.devnullapps.widgetleaf.domain.usecase.EdgeDirection.LEFT,
+                                landingX,
+                                editingWidget.cellY
+                            )
+                        } else {
+                            viewModel.navigatePreviousPage()
+                        }
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT,
                     KeyEvent.KEYCODE_PAGE_DOWN -> {
-                        viewModel.navigateNextPage()
+                        val editingId = state.editingWidgetId
+                        val editingWidget = if (editingId != null && event.isShiftPressed) {
+                            state.widgets.find { it.appWidgetId == editingId }
+                        } else {
+                            null
+                        }
+                        if (editingWidget != null) {
+                            viewModel.dragWidgetAcrossEdge(
+                                editingWidget.appWidgetId,
+                                io.devnullapps.widgetleaf.domain.usecase.EdgeDirection.RIGHT,
+                                0,
+                                editingWidget.cellY
+                            )
+                        } else {
+                            viewModel.navigateNextPage()
+                        }
                         return true
                     }
                     in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> {

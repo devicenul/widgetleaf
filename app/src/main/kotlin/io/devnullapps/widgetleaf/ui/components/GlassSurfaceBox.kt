@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,10 +32,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
@@ -43,6 +47,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.devnullapps.widgetleaf.domain.model.DesktopGridProfile
@@ -160,12 +165,40 @@ fun WidgetEditResizeFrame(
         PointerIcon.Hand
     )
 
+    var topDragY by remember { mutableFloatStateOf(0f) }
+    var bottomDragY by remember { mutableFloatStateOf(0f) }
+    var leftDragX by remember { mutableFloatStateOf(0f) }
+    var rightDragX by remember { mutableFloatStateOf(0f) }
+    val leafBrightColor = WidgetLeafTheme.palette.leafBright
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .testTag("widget_edit_frame_${widget.appWidgetId}")
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0x400D1117))
+            .drawWithContent {
+                drawContent()
+                if (topDragY != 0f || bottomDragY != 0f || leftDragX != 0f || rightDragX != 0f) {
+                    val minSizePx = 48.dp.toPx()
+                    val previewLeft = leftDragX.coerceAtMost(size.width - minSizePx)
+                    val previewTop = topDragY.coerceAtMost(size.height - minSizePx)
+                    val previewWidth = (size.width + rightDragX - previewLeft).coerceAtLeast(minSizePx)
+                    val previewHeight = (size.height + bottomDragY - previewTop).coerceAtLeast(minSizePx)
+                    drawRoundRect(
+                        color = leafBrightColor.copy(alpha = 0.20f),
+                        topLeft = Offset(previewLeft, previewTop),
+                        size = Size(previewWidth, previewHeight),
+                        cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx())
+                    )
+                    drawRoundRect(
+                        color = leafBrightColor,
+                        topLeft = Offset(previewLeft, previewTop),
+                        size = Size(previewWidth, previewHeight),
+                        cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx()),
+                        style = Stroke(width = 2.5.dp.toPx())
+                    )
+                }
+            }
+            .background(Color(0x400D1117), RoundedCornerShape(16.dp))
             .border(2.dp, WidgetLeafTheme.palette.leafPrimary, RoundedCornerShape(16.dp))
     ) {
         // Centered floating action pill (100% inside widget hit bounds, never overlaps top bar or edge handles)
@@ -245,7 +278,6 @@ fun WidgetEditResizeFrame(
         }
 
         // Top drag handle (full top edge grab zone with ↕ resize cursor)
-        var topDragY by remember { mutableFloatStateOf(0f) }
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -289,6 +321,7 @@ fun WidgetEditResizeFrame(
         ) {
             Box(
                 modifier = Modifier
+                    .offset { IntOffset(0, topDragY.roundToInt()) }
                     .padding(top = 3.dp)
                     .size(width = 56.dp, height = 8.dp)
                     .clip(RoundedCornerShape(4.dp))
@@ -298,7 +331,6 @@ fun WidgetEditResizeFrame(
         }
 
         // Bottom drag handle (full bottom edge grab zone with ↕ resize cursor)
-        var bottomDragY by remember { mutableFloatStateOf(0f) }
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -338,6 +370,7 @@ fun WidgetEditResizeFrame(
         ) {
             Box(
                 modifier = Modifier
+                    .offset { IntOffset(0, bottomDragY.roundToInt()) }
                     .padding(bottom = 3.dp)
                     .size(width = 56.dp, height = 8.dp)
                     .clip(RoundedCornerShape(4.dp))
@@ -347,7 +380,6 @@ fun WidgetEditResizeFrame(
         }
 
         // Left drag handle (full left edge grab zone with ↔ resize cursor)
-        var leftDragX by remember { mutableFloatStateOf(0f) }
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
@@ -391,6 +423,7 @@ fun WidgetEditResizeFrame(
         ) {
             Box(
                 modifier = Modifier
+                    .offset { IntOffset(leftDragX.roundToInt(), 0) }
                     .padding(start = 3.dp)
                     .size(width = 8.dp, height = 56.dp)
                     .clip(RoundedCornerShape(4.dp))
@@ -400,7 +433,6 @@ fun WidgetEditResizeFrame(
         }
 
         // Right drag handle (full right edge grab zone with ↔ resize cursor)
-        var rightDragX by remember { mutableFloatStateOf(0f) }
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
@@ -440,6 +472,7 @@ fun WidgetEditResizeFrame(
         ) {
             Box(
                 modifier = Modifier
+                    .offset { IntOffset(rightDragX.roundToInt(), 0) }
                     .padding(end = 3.dp)
                     .size(width = 8.dp, height = 56.dp)
                     .clip(RoundedCornerShape(4.dp))
