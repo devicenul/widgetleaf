@@ -203,13 +203,7 @@ fun WidgetEditResizeFrame(
     ) {
         // Centered floating action pill (100% inside widget hit bounds, never overlaps top bar or edge handles)
         GlassHudSurface(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = { /* Consume stray clicks on the pill frame */ }
-                ),
+            modifier = Modifier.align(Alignment.Center),
             shape = RoundedCornerShape(22.dp),
             backgroundColor = Color(0xF2161B22),
             borderColor = WidgetLeafTheme.palette.leafPrimary.copy(alpha = 0.7f),
@@ -282,8 +276,8 @@ fun WidgetEditResizeFrame(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .height(28.dp)
+                .padding(horizontal = 20.dp)
+                .height(20.dp)
                 .pointerHoverIcon(verticalResizeIcon)
                 .testTag("resize_handle_top_${widget.appWidgetId}")
                 .pointerInput(widget.appWidgetId) {
@@ -335,8 +329,8 @@ fun WidgetEditResizeFrame(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .height(28.dp)
+                .padding(horizontal = 20.dp)
+                .height(20.dp)
                 .pointerHoverIcon(verticalResizeIcon)
                 .testTag("resize_handle_bottom_${widget.appWidgetId}")
                 .pointerInput(widget.appWidgetId) {
@@ -384,8 +378,8 @@ fun WidgetEditResizeFrame(
             modifier = Modifier
                 .align(Alignment.CenterStart)
                 .fillMaxHeight()
-                .padding(vertical = 24.dp)
-                .width(28.dp)
+                .padding(vertical = 20.dp)
+                .width(20.dp)
                 .pointerHoverIcon(horizontalResizeIcon)
                 .testTag("resize_handle_left_${widget.appWidgetId}")
                 .pointerInput(widget.appWidgetId) {
@@ -437,8 +431,8 @@ fun WidgetEditResizeFrame(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .fillMaxHeight()
-                .padding(vertical = 24.dp)
-                .width(28.dp)
+                .padding(vertical = 20.dp)
+                .width(20.dp)
                 .pointerHoverIcon(horizontalResizeIcon)
                 .testTag("resize_handle_right_${widget.appWidgetId}")
                 .pointerInput(widget.appWidgetId) {

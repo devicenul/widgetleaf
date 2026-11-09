@@ -512,14 +512,16 @@ class DeckScreenComposeTest {
             label = "Calendar"
         )
 
+        var movedCellY = -1
         var resizedSpanY = -1
         var bumpedDirection: io.devnullapps.widgetleaf.domain.usecase.EdgeDirection? = null
+        var currentEditingId by mutableStateOf<Int?>(null)
 
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
                     widgets = listOf(widget),
-                    editingWidgetId = 101
+                    editingWidgetId = currentEditingId
                 ),
                 onDismissOverlay = {},
                 onSelectPage = {},
@@ -534,6 +536,9 @@ class DeckScreenComposeTest {
                 onUpdateSettings = {},
                 onStartEditPageLabel = {},
                 onCommitPageLabel = { _, _ -> },
+                onMoveWidget = { _, _, newCellY ->
+                    movedCellY = newCellY
+                },
                 onResizeWidget = { _, _, _, _, newSpanY ->
                     resizedSpanY = newSpanY
                 },
@@ -544,6 +549,19 @@ class DeckScreenComposeTest {
         }
 
         composeTestRule.waitForIdle()
+
+        // Transition from non-editing (null) to editing (101), matching real device flow
+        composeTestRule.runOnIdle {
+            currentEditingId = 101
+        }
+        composeTestRule.waitForIdle()
+
+        // Drag widget interior downward to move widget within current page
+        composeTestRule.onNodeWithTag("placed_widget_101").performTouchInput {
+            swipeDown(startY = top + 40f, endY = top + 300f, durationMillis = 200)
+        }
+        composeTestRule.waitForIdle()
+        assertThat(movedCellY).isGreaterThan(0)
 
         // Drag bottom resize handle down by ~300px -> increases spanY beyond 2 even though maxSpanY was 2
         composeTestRule.onNodeWithTag("resize_handle_bottom_101").performTouchInput {

@@ -347,7 +347,7 @@ fun WidgetGridPage(
                             if (isEditing) {
                                 Modifier
                                     .pointerHoverIcon(movePointerIcon)
-                                    .pointerInput(widget.appWidgetId) {
+                                    .pointerInput(widget.appWidgetId, true) {
                                         detectDragGestures(
                                             onDragStart = { startOffset ->
                                                 lastWidgetActionTimeMs = SystemClock.uptimeMillis()
@@ -415,7 +415,7 @@ fun WidgetGridPage(
                                     }
                             } else {
                                 Modifier
-                                    .pointerInput(widget.appWidgetId) {
+                                    .pointerInput(widget.appWidgetId, false) {
                                         awaitPointerEventScope {
                                             while (true) {
                                                 val event = awaitPointerEvent(PointerEventPass.Initial)
