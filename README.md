@@ -25,5 +25,6 @@ Inspired by the metaphor of a *Digital Flyleaf*, WidgetLeaf drops an ephemeral, 
 
 ## Documentation
 
+- [AI Agent Onboarding & Architecture (`_agents/`)](_agents/README.md) ([`AGENTS.md`](AGENTS.md))
 - [Architecture & Implementation Plan](docs/IMPLEMENTATION_PLAN.md)
 - [WidgetLeaf Design Bible (Google Doc)](https://docs.google.com/document/d/1noMsVDyMKCZhwh6bBdH45exHTnK5qCK6_NqssBTImI4/edit)
