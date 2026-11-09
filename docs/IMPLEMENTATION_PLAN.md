@@ -1,4 +1,4 @@
-# Architecture & Development Plan: **WidgetLeaf** (`com.rrjefferson.widgetleaf`)
+# Architecture & Development Plan: **WidgetLeaf** (`io.devnullapps.widgetleaf`)
 
 > [!IMPORTANT]
 > **Dual-Audience Specification:** This document is structured both as an **executive & architectural blueprint for human reviewers** and as an **executable, deterministic specification for autonomous development agents** operating in the Android Laptop Linux VM environment.
@@ -11,7 +11,7 @@
 ![WidgetLeaf Master Icon](/storage/emulated/10/AntiGravity/.gemini/antigravity/brain/0b0e4274-81a8-4992-9f7c-57326535e0d2/widgetleaf_icon.jpg)
 
 ### 1.1 Overview & Metaphor: *The Digital Flyleaf*
-**WidgetLeaf** (`applicationId = "com.rrjefferson.widgetleaf"`, output artifact `WidgetLeaf-debug.apk` / `WidgetLeaf-release.apk`) is an on-demand, frosted-glass HUD and modular widget deck designed specifically for Android Desktop and Laptop environments ("Googlebook").
+**WidgetLeaf** (`applicationId = "io.devnullapps.widgetleaf"`, output artifact `WidgetLeaf-debug.apk` / `WidgetLeaf-release.apk`) is an on-demand, frosted-glass HUD and modular widget deck designed specifically for Android Desktop and Laptop environments ("Googlebook").
 
 In physical bookbinding, a *flyleaf* is the protective sheet resting directly inside the cover before the primary text begins. In **WidgetLeaf**, this becomes an ephemeral, translucent frosted-glass canopy that drops over active workspace windows via a **Taskbar/Shelf click**, **Top Menu Bar / BentoBar icon**, or **global hotkey** (`Search + W` / `Alt + Space` / `ACTION_ASSIST`), presenting live interactive Android widgets and vanishing instantly with a single keystroke (`Escape`) or outside click.
 
@@ -202,13 +202,13 @@ widgetleaf/
 │       ├── ci.yml                          # PR & Push: Lint + Unit/Robolectric Tests + Coverage + Debug APK
 │       └── release.yml                     # Tag v*: Signed AAB + GitHub Release + Gradle Play Publisher
 ├── app/
-│   ├── build.gradle.kts                    # namespace="com.rrjefferson.widgetleaf", archivesBaseName="WidgetLeaf", SDK 35
+│   ├── build.gradle.kts                    # namespace="io.devnullapps.widgetleaf", archivesBaseName="WidgetLeaf", SDK 35
 │   ├── proguard-rules.pro
 │   └── src/
 │       ├── main/
 │       │   ├── AndroidManifest.xml         # Exported declarations, zero PHA permissions
 │       │   ├── ic_launcher-playstore.png   # 512x512 32-bit Master Icon Asset
-│       │   ├── kotlin/com/rrjefferson/widgetleaf/
+│       │   ├── kotlin/io/devnullapps/widgetleaf/
 │       │   │   ├── WidgetLeafApp.kt        # Application class & DI container initialization
 │       │   │   ├── di/
 │       │   │   │   └── AppContainer.kt     # Constructor DI factory wiring
@@ -284,7 +284,7 @@ widgetleaf/
 │       │           ├── strings.xml
 │       │           └── styles.xml                      # Theme.WidgetLeaf.Translucent (36dp blur)
 │       └── test/                                       # Pure JVM + Robolectric + Headless Compose tests
-│           └── kotlin/com/rrjefferson/widgetleaf/
+│           └── kotlin/io/devnullapps/widgetleaf/
 │               ├── domain/
 │               │   ├── GridCollisionResolverTest.kt
 │               │   ├── WidgetSpanCalculatorTest.kt
@@ -316,7 +316,7 @@ Development agents executing this plan on Android Laptop **MUST** follow these m
 2. **Android CLI Toolchain:**
    Manage SDK packages strictly via `android sdk install platforms/android-35 build-tools/35.0.0 platform-tools` (never `sdkmanager`).
 3. **AOSP & Play Protect Zero-Tolerance Guardrails:**
-   * `namespace = "com.rrjefferson.widgetleaf"`, `applicationId = "com.rrjefferson.widgetleaf"`, `archivesBaseName = "WidgetLeaf"`.
+   * `namespace = "io.devnullapps.widgetleaf"`, `applicationId = "io.devnullapps.widgetleaf"`, `archivesBaseName = "WidgetLeaf"`.
    * `targetSdk = 35` (meets `>= 34` requirement), `minSdk = 31` (Android 12+ for native cross-window blur and modern responsive widgets).
    * `ndk.abiFilters += listOf("arm64-v8a", "x86_64")`.
    * **Zero Prohibited Permissions:** Do **NOT** declare `BIND_ACCESSIBILITY_SERVICE`, `SYSTEM_ALERT_WINDOW`, `REQUEST_INSTALL_PACKAGES`, `READ_SMS`, `RECEIVE_SMS`, or `BIND_NOTIFICATION_LISTENER_SERVICE`.
@@ -362,7 +362,7 @@ Triggered on pushing a version tag (`v*.*.*`):
 ## 8. Phased Implementation Roadmap
 
 * **Phase 1 — Project Scaffolding, Icons & Core Domain (TDD):**
-  Initialize `widgetleaf` (`com.rrjefferson.widgetleaf`) in `/storage/emulated/10/AntiGravity/Workspaces/widgetleaf` using Android CLI, generate adaptive launcher/taskbar/tray icons from the WidgetLeaf Master Icon, implement `GridCollisionResolver` (auto-bump), `WidgetSpanCalculator`, `EdgePageDragTransferUseCase`, Room DB, and Preferences DataStore with unit tests.
+  Initialize `widgetleaf` (`io.devnullapps.widgetleaf`) in `/storage/emulated/10/AntiGravity/Workspaces/widgetleaf` using Android CLI, generate adaptive launcher/taskbar/tray icons from the WidgetLeaf Master Icon, implement `GridCollisionResolver` (auto-bump), `WidgetSpanCalculator`, `EdgePageDragTransferUseCase`, Room DB, and Preferences DataStore with unit tests.
 * **Phase 2 — `AppWidgetHost` Gateway & Custom `DeckAppWidgetHostView`:**
   Implement `WidgetDeckHost`, `DeckAppWidgetHostView` (right-click/Ctrl-click/two-finger click interception, mouse wheel scroll routing, smart auto-dismiss on external `Activity` launch, crash-safe `getErrorView()`), and `AndroidWidgetHostGateway`.
 * **Phase 3 — Translucent Blurred Overlay Activity, Bento Glass Cards & Multi-Page UI:**

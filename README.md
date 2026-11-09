@@ -1,4 +1,4 @@
-# WidgetLeaf (`com.rrjefferson.widgetleaf`)
+# WidgetLeaf (`io.devnullapps.widgetleaf`)
 
 <p align="center">
   <img src="docs/assets/widgetleaf_icon.jpg" alt="WidgetLeaf Icon" width="220" />
