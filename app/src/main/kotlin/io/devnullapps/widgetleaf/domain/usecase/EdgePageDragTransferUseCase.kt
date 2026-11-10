@@ -21,7 +21,7 @@ sealed interface EdgeTransferResult {
 }
 
 class EdgePageDragTransferUseCase(
-    private val collisionResolver: GridCollisionResolver = GridCollisionResolver()
+    private val cascadeResolver: CascadeDisplacementResolver = CascadeDisplacementResolver()
 ) {
 
     fun transferAcrossEdge(
@@ -50,68 +50,31 @@ class EdgePageDragTransferUseCase(
         val clampedX = targetCellX.coerceIn(0, (gridProfile.columns - widget.spanX).coerceAtLeast(0))
         val clampedY = targetCellY.coerceIn(0, (gridProfile.rows - widget.spanY).coerceAtLeast(0))
 
-        if (direction == EdgeDirection.RIGHT && sourcePageIndex >= currentPages.lastIndex) {
-            // Dragging RIGHT from the last page: dynamically creates a new page N
-            val newPage = DeckPage(pageIndex = currentPages.size, customLabel = null)
-            val candidateWidget = widget.copy(
-                pageIndex = newPage.pageIndex,
-                cellX = clampedX,
-                cellY = clampedY
-            )
-            if (!candidateWidget.bounds.isWithin(gridProfile.columns, gridProfile.rows)) {
-                return EdgeTransferResult.RejectedFullPage
-            }
-            val allPages = currentPages + newPage
-            val allWidgets = currentWidgets.filter { it.appWidgetId != widgetId } + candidateWidget
-            val (prunedPages, prunedWidgets) = pruneAndReindexPages(allPages, allWidgets)
-            val finalPageIndex = prunedWidgets.find { it.appWidgetId == widgetId }?.pageIndex ?: newPage.pageIndex
-            return EdgeTransferResult.Success(
-                pages = prunedPages,
-                widgets = prunedWidgets,
-                targetPageIndex = finalPageIndex
-            )
-        }
-
-        // Moving onto an existing adjacent page
-        val existingWidgetsOnTargetPage = currentWidgets.filter { it.pageIndex == targetPageIndex }
         val candidateWidget = widget.copy(
             pageIndex = targetPageIndex,
             cellX = clampedX,
             cellY = clampedY
         )
 
-        val placementResult = collisionResolver.resolvePlacement(
-            target = candidateWidget,
-            existingOnPage = existingWidgetsOnTargetPage,
-            columns = gridProfile.columns,
-            rows = gridProfile.rows
-        )
-
-        val updatedTargetPageWidgets: List<PlacedWidget>? = when (placementResult) {
-            is PlacementResult.Accepted -> placementResult.updatedWidgets
-            is PlacementResult.Rejected -> {
-                val spot = collisionResolver.findFirstAvailableSpot(
-                    spanX = widget.spanX,
-                    spanY = widget.spanY,
-                    existingOnPage = existingWidgetsOnTargetPage,
-                    columns = gridProfile.columns,
-                    rows = gridProfile.rows
-                )
-                if (spot != null) {
-                    existingWidgetsOnTargetPage + candidateWidget.copy(cellX = spot.first, cellY = spot.second)
-                } else {
-                    null
-                }
-            }
-        }
-
-        if (updatedTargetPageWidgets == null) {
+        if (!candidateWidget.bounds.isWithin(gridProfile.columns, gridProfile.rows) || targetPageIndex < 0) {
             return EdgeTransferResult.RejectedFullPage
         }
 
-        val otherWidgets = currentWidgets.filter { it.pageIndex != targetPageIndex && it.appWidgetId != widgetId }
-        val allWidgets = otherWidgets + updatedTargetPageWidgets
-        val (prunedPages, prunedWidgets) = pruneAndReindexPages(currentPages, allWidgets)
+        val effectivePageCount = maxOf(currentPages.size, targetPageIndex + 1)
+        val cascadeResult = cascadeResolver.resolve(
+            dragged = candidateWidget,
+            allWidgets = currentWidgets,
+            columns = gridProfile.columns,
+            rows = gridProfile.rows,
+            pageCount = effectivePageCount
+        ) ?: return EdgeTransferResult.RejectedFullPage
+
+        val expandedPages = currentPages.toMutableList()
+        while (expandedPages.size < cascadeResult.pageCount) {
+            expandedPages.add(DeckPage(pageIndex = expandedPages.size, customLabel = null))
+        }
+
+        val (prunedPages, prunedWidgets) = pruneAndReindexPages(expandedPages, cascadeResult.widgets)
         val finalPageIndex = prunedWidgets.find { it.appWidgetId == widgetId }?.pageIndex ?: targetPageIndex
 
         return EdgeTransferResult.Success(

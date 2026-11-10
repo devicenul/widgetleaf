@@ -139,7 +139,7 @@ class EdgePageDragTransferUseCaseTest {
     }
 
     @Test
-    fun dragOntoCompletelyFullAdjacentPage_returnsRejectedFullPage() {
+    fun dragOntoFullAdjacentPage_cascadesDisplacedWidgetsToNextPage() {
         val smallProfile = DesktopGridProfile(columns = 2, rows = 2)
         val page0 = DeckPage(pageIndex = 0)
         val page1 = DeckPage(pageIndex = 1)
@@ -148,9 +148,8 @@ class EdgePageDragTransferUseCaseTest {
         val p0w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 1)
         val p0w2 = createWidget(id = 2, pageIndex = 0, cellX = 0, cellY = 1, spanX = 2, spanY = 1)
 
-        // Page 1 has w3
+        // Page 1 has w3 (cell 0,0) and w4 (cell 0,1)
         val p1w3 = createWidget(id = 3, pageIndex = 1, cellX = 0, cellY = 0, spanX = 2, spanY = 1)
-        // And p1w4 so page 1 wouldn't be completely empty
         val p1w4 = createWidget(id = 4, pageIndex = 1, cellX = 0, cellY = 1, spanX = 2, spanY = 1)
 
         val result = useCase.transferAcrossEdge(
@@ -163,6 +162,41 @@ class EdgePageDragTransferUseCaseTest {
             gridProfile = smallProfile
         )
 
+        assertTrue(result is EdgeTransferResult.Success)
+        val success = result as EdgeTransferResult.Success
+        assertEquals(0, success.targetPageIndex)
+
+        val movedW3 = success.widgets.find { it.appWidgetId == 3 }
+        assertEquals(0, movedW3?.pageIndex)
+        assertEquals(0, movedW3?.cellX)
+        assertEquals(0, movedW3?.cellY)
+
+        // p0w1 was displaced from (0,0) of page 0 downward to (0,1), displacing p0w2 onto page 1 at (0,0)
+        val displacedW1 = success.widgets.find { it.appWidgetId == 1 }
+        assertEquals(0, displacedW1?.pageIndex)
+        assertEquals(0, displacedW1?.cellX)
+        assertEquals(1, displacedW1?.cellY)
+
+        val displacedW2 = success.widgets.find { it.appWidgetId == 2 }
+        assertEquals(1, displacedW2?.pageIndex)
+        assertEquals(0, displacedW2?.cellX)
+        assertEquals(0, displacedW2?.cellY)
+    }
+
+    @Test
+    fun dragOutOfBounds_returnsRejectedFullPage() {
+        val page0 = DeckPage(pageIndex = 0)
+        // Widget span 3 exceeds 2x2 grid
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 3, spanY = 1)
+        val result = useCase.transferAcrossEdge(
+            widgetId = 1,
+            direction = EdgeDirection.RIGHT,
+            targetCellX = 0,
+            targetCellY = 0,
+            currentPages = listOf(page0),
+            currentWidgets = listOf(w1),
+            gridProfile = DesktopGridProfile(columns = 2, rows = 2)
+        )
         assertEquals(EdgeTransferResult.RejectedFullPage, result)
     }
 

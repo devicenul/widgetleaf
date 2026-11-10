@@ -77,14 +77,15 @@ fun WidgetDeckOverlayScreen(
         onEnterEditMode = viewModel::enterWidgetEditMode,
         onExitEditMode = viewModel::exitWidgetEditMode,
         onMoveWidget = { id, x, y ->
-            val w = uiState.widgets.find { it.appWidgetId == id }
-            if (w != null) {
-                viewModel.moveOrResizeWidget(id, x, y, w.spanX, w.spanY)
-            }
+            viewModel.moveWidget(id, x, y)
         },
         onResizeWidget = { id, x, y, sx, sy ->
-            viewModel.moveOrResizeWidget(id, x, y, sx, sy)
+            viewModel.resizeWidget(id, x, y, sx, sy)
         },
+        onStartWidgetDrag = viewModel::startWidgetDrag,
+        onWidgetHoverCellChanged = viewModel::onWidgetHoverCellChanged,
+        onCommitWidgetDrag = viewModel::commitWidgetDrag,
+        onCancelWidgetDrag = viewModel::cancelWidgetDrag,
         onDragAcrossEdge = viewModel::dragWidgetAcrossEdge,
         onRemoveWidget = viewModel::removeWidget,
         onReconfigureWidget = { /* Handled by host activity/flow */ },
@@ -119,6 +120,10 @@ fun WidgetDeckOverlayScreen(
     onMoveWidget: (appWidgetId: Int, newCellX: Int, newCellY: Int) -> Unit = { _, _, _ -> },
     onResizeWidget: (appWidgetId: Int, newCellX: Int, newCellY: Int, newSpanX: Int, newSpanY: Int) -> Unit = { _, _, _, _, _ -> },
     onDragAcrossEdge: (appWidgetId: Int, direction: EdgeDirection, targetCellX: Int, targetCellY: Int) -> Unit = { _, _, _, _ -> },
+    onStartWidgetDrag: (appWidgetId: Int) -> Unit = {},
+    onWidgetHoverCellChanged: (appWidgetId: Int, cellX: Int, cellY: Int) -> Unit = { _, _, _ -> },
+    onCommitWidgetDrag: (appWidgetId: Int, cellX: Int, cellY: Int) -> Unit = { id, x, y -> onMoveWidget(id, x, y) },
+    onCancelWidgetDrag: () -> Unit = {},
     onRemoveWidget: (appWidgetId: Int) -> Unit = {},
     onReconfigureWidget: ((appWidgetId: Int) -> Unit)? = null,
     onOpenContextMenu: (Pair<Float, Float>) -> Unit = {},
@@ -212,7 +217,7 @@ fun WidgetDeckOverlayScreen(
                 label = "DeckPageTransition",
                 modifier = Modifier.fillMaxSize()
             ) { pageIndex ->
-                val pageWidgets = uiState.widgets.filter { it.pageIndex == pageIndex }
+                val pageWidgets = uiState.effectiveWidgets.filter { it.pageIndex == pageIndex }
                 val showEmptyHint = uiState.showEmptyCanvasHint && pageIndex == 0
 
                 WidgetGridPage(
@@ -221,6 +226,25 @@ fun WidgetDeckOverlayScreen(
                     showEmptyCanvasHint = showEmptyHint,
                     editingWidgetId = uiState.editingWidgetId,
                     useCenteredBentoCanvas = uiState.settings.useCenteredBentoCanvas,
+                    draggingWidgetId = uiState.draggingWidgetId,
+                    hoveredCell = uiState.hoveredCell,
+                    displacedWidgetIds = uiState.displacedWidgetIds,
+                    onStartWidgetDrag = { id ->
+                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                        onStartWidgetDrag(id)
+                    },
+                    onWidgetHoverCellChanged = { id, x, y ->
+                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                        onWidgetHoverCellChanged(id, x, y)
+                    },
+                    onCommitWidgetDrag = { id, x, y ->
+                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                        onCommitWidgetDrag(id, x, y)
+                    },
+                    onCancelWidgetDrag = {
+                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                        onCancelWidgetDrag()
+                    },
                     onEnterEditMode = { id ->
                         lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
                         onEnterEditMode(id)

@@ -271,12 +271,11 @@ fun WidgetEditResizeFrame(
             }
         }
 
-        // Top drag handle (full top edge grab zone with ↕ resize cursor)
+        // Top drag handle (centered handle grab zone with ↕ resize cursor)
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
+                .width(64.dp)
                 .height(20.dp)
                 .pointerHoverIcon(verticalResizeIcon)
                 .testTag("resize_handle_top_${widget.appWidgetId}")
@@ -324,12 +323,11 @@ fun WidgetEditResizeFrame(
             )
         }
 
-        // Bottom drag handle (full bottom edge grab zone with ↕ resize cursor)
+        // Bottom drag handle (centered handle grab zone with ↕ resize cursor)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
+                .width(64.dp)
                 .height(20.dp)
                 .pointerHoverIcon(verticalResizeIcon)
                 .testTag("resize_handle_bottom_${widget.appWidgetId}")
@@ -373,13 +371,12 @@ fun WidgetEditResizeFrame(
             )
         }
 
-        // Left drag handle (full left edge grab zone with ↔ resize cursor)
+        // Left drag handle (centered handle grab zone with ↔ resize cursor)
         Box(
             modifier = Modifier
                 .align(Alignment.CenterStart)
-                .fillMaxHeight()
-                .padding(vertical = 20.dp)
                 .width(20.dp)
+                .height(64.dp)
                 .pointerHoverIcon(horizontalResizeIcon)
                 .testTag("resize_handle_left_${widget.appWidgetId}")
                 .pointerInput(widget.appWidgetId) {
@@ -426,13 +423,12 @@ fun WidgetEditResizeFrame(
             )
         }
 
-        // Right drag handle (full right edge grab zone with ↔ resize cursor)
+        // Right drag handle (centered handle grab zone with ↔ resize cursor)
         Box(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .padding(vertical = 20.dp)
                 .width(20.dp)
+                .height(64.dp)
                 .pointerHoverIcon(horizontalResizeIcon)
                 .testTag("resize_handle_right_${widget.appWidgetId}")
                 .pointerInput(widget.appWidgetId) {

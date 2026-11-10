@@ -600,6 +600,119 @@ class DeckScreenComposeTest {
     }
 
     @Test
+    fun draggingWidgetOntoOccupiedCell_cascadesDisplacedWidgetAndPreservesSpan() {
+        val w1 = PlacedWidget(
+            appWidgetId = 201,
+            providerPackage = "io.devnullapps.w1",
+            providerClass = "Widget1",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            minSpanX = 2,
+            minSpanY = 2,
+            maxSpanX = 2,
+            maxSpanY = 2,
+            label = "Widget 1"
+        )
+        val w2 = PlacedWidget(
+            appWidgetId = 202,
+            providerPackage = "io.devnullapps.w2",
+            providerClass = "Widget2",
+            pageIndex = 0,
+            cellX = 2,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            minSpanX = 2,
+            minSpanY = 2,
+            maxSpanX = 2,
+            maxSpanY = 2,
+            label = "Widget 2"
+        )
+
+        var state by mutableStateOf(
+            DeckUiState(
+                widgets = listOf(w1, w2),
+                editingWidgetId = 201
+            )
+        )
+
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = state,
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                onEnterEditMode = { id ->
+                    state = state.copy(editingWidgetId = id)
+                },
+                onStartWidgetDrag = { id ->
+                    state = state.copy(draggingWidgetId = id)
+                },
+                onWidgetHoverCellChanged = { id, cellX, cellY ->
+                    state = state.copy(hoveredCell = Pair(cellX, cellY))
+                },
+                onCommitWidgetDrag = { id, cellX, cellY ->
+                    val dragged = state.widgets.find { it.appWidgetId == id }!!
+                    val target = dragged.copy(cellX = cellX, cellY = cellY)
+                    val result = io.devnullapps.widgetleaf.domain.usecase.CascadeDisplacementResolver.resolve(
+                        dragged = target,
+                        allWidgets = state.widgets,
+                        columns = state.gridProfile.columns,
+                        rows = state.gridProfile.rows,
+                        pageCount = state.pages.size
+                    )
+                    if (result != null) {
+                        state = state.copy(
+                            widgets = result.widgets,
+                            draggingWidgetId = null,
+                            hoveredCell = null
+                        )
+                    }
+                },
+                onCancelWidgetDrag = {
+                    state = state.copy(draggingWidgetId = null, hoveredCell = null)
+                }
+            )
+        }
+
+        composeTestRule.waitForIdle()
+
+        // Drag w1 from cell (0,0) rightward by ~300px onto cell (2,0)
+        composeTestRule.onNodeWithTag("placed_widget_201").performTouchInput {
+            swipeRight(startX = centerX - 40f, endX = centerX + 260f, durationMillis = 200)
+        }
+        composeTestRule.waitForIdle()
+
+        val finalW1 = state.widgets.find { it.appWidgetId == 201 }
+        val finalW2 = state.widgets.find { it.appWidgetId == 202 }
+
+        // Dragged widget took target cell (2, 0) and KEPT its original span (2, 2)
+        assertThat(finalW1?.cellX).isEqualTo(2)
+        assertThat(finalW1?.cellY).isEqualTo(0)
+        assertThat(finalW1?.spanX).isEqualTo(2)
+        assertThat(finalW1?.spanY).isEqualTo(2)
+
+        // Displaced widget w2 cascaded downward to (2, 2) and KEPT its original span (2, 2)
+        assertThat(finalW2?.cellX).isEqualTo(2)
+        assertThat(finalW2?.cellY).isEqualTo(2)
+        assertThat(finalW2?.spanX).isEqualTo(2)
+        assertThat(finalW2?.spanY).isEqualTo(2)
+    }
+
+    @Test
     fun clickingAddWidgetButtonInHudOpensWidgetPicker() {
         var pickerOpened = false
 

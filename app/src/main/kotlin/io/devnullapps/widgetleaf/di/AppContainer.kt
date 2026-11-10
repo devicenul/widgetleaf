@@ -8,6 +8,7 @@ import io.devnullapps.widgetleaf.data.local.PreferencesDataStore
 import io.devnullapps.widgetleaf.data.repository.DefaultWidgetDeckRepository
 import io.devnullapps.widgetleaf.domain.repository.WidgetDeckRepository
 import io.devnullapps.widgetleaf.domain.usecase.CalculateResponsiveSizesUseCase
+import io.devnullapps.widgetleaf.domain.usecase.CascadeDisplacementResolver
 import io.devnullapps.widgetleaf.domain.usecase.EdgePageDragTransferUseCase
 import io.devnullapps.widgetleaf.domain.usecase.GridCollisionResolver
 import io.devnullapps.widgetleaf.domain.usecase.ReconcileOrphanWidgetsUseCase
@@ -88,6 +89,10 @@ open class AppContainer(
         TaskbarPlacementManager()
     }
 
+    val cascadeDisplacementResolver: CascadeDisplacementResolver by lazy {
+        CascadeDisplacementResolver()
+    }
+
     val gridCollisionResolver: GridCollisionResolver by lazy {
         GridCollisionResolver()
     }
@@ -97,7 +102,7 @@ open class AppContainer(
     }
 
     val edgePageDragTransferUseCase: EdgePageDragTransferUseCase by lazy {
-        EdgePageDragTransferUseCase(gridCollisionResolver)
+        EdgePageDragTransferUseCase(cascadeDisplacementResolver)
     }
 
     val reconcileOrphanWidgetsUseCase: ReconcileOrphanWidgetsUseCase by lazy {

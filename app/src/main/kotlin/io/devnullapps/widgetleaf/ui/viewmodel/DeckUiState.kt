@@ -11,12 +11,16 @@ sealed interface PendingWidgetAction {
         val appWidgetId: Int,
         val providerPackage: String,
         val providerClass: String,
-        val candidateWidget: PlacedWidget
+        val candidateWidget: PlacedWidget,
+        val resolvedWidgets: List<PlacedWidget>? = null,
+        val resolvedPageCount: Int? = null
     ) : PendingWidgetAction
 
     data class RequestConfigure(
         val appWidgetId: Int,
-        val candidateWidget: PlacedWidget
+        val candidateWidget: PlacedWidget,
+        val resolvedWidgets: List<PlacedWidget>? = null,
+        val resolvedPageCount: Int? = null
     ) : PendingWidgetAction
 }
 
@@ -36,10 +40,32 @@ data class DeckUiState(
     val settings: OverlaySettings = OverlaySettings(),
     val gridProfile: DesktopGridProfile = DesktopGridProfile(),
     val isLaunchingInternalFlow: Boolean = false,
-    val pendingWidgetAction: PendingWidgetAction? = null
+    val pendingWidgetAction: PendingWidgetAction? = null,
+    val previewWidgets: List<PlacedWidget>? = null,
+    val previewPageCount: Int? = null,
+    val displacedWidgetIds: Set<Int> = emptySet(),
+    val draggingWidgetId: Int? = null,
+    val hoveredCell: Pair<Int, Int>? = null
 ) {
+    val effectiveWidgets: List<PlacedWidget>
+        get() = previewWidgets ?: widgets
+
+    val effectivePageCount: Int
+        get() = previewPageCount ?: pages.size
+
+    val effectivePages: List<DeckPage>
+        get() {
+            val count = effectivePageCount
+            if (count <= pages.size) return pages
+            val result = pages.toMutableList()
+            for (i in pages.size until count) {
+                result.add(DeckPage(pageIndex = i, customLabel = null))
+            }
+            return result
+        }
+
     val activePageWidgets: List<PlacedWidget>
-        get() = widgets.filter { it.pageIndex == activePageIndex }
+        get() = effectiveWidgets.filter { it.pageIndex == activePageIndex }
 
     val showEmptyCanvasHint: Boolean
         get() = pages.size == 1 && widgets.isEmpty()

@@ -16,7 +16,9 @@
 - **Desktop Pointer & Keyboard First:**
   - **Normal Mode:** Widgets are live and interactive. Clicking empty background or pressing `Escape` / any non-UI key (`Space`, letters, symbols) dismisses the overlay.
   - **Context Menu:** Right-clicking (`BUTTON_SECONDARY`), `Ctrl+Click`, two-finger clicking, or long-pressing the **empty canvas** opens the desktop context menu (`Widgets`, `Overlay Settings`).
-  - **Widget Edit Mode:** Right-clicking, `Ctrl+Click`, two-finger clicking, or long-pressing a **widget** enters `EDIT_MODE` for that widget ONLY (suppressing the canvas context menu). Displays a centered `Reconfigure | Remove` pill inside the widget bounds, 4 perimeter resize handles with native desktop resize cursors (`↔` / `↕`) and live emerald outline preview, and interior drag-to-move (including dragging across left/right screen edges to bump widgets to adjacent pages).
+  - **Widget Edit Mode:** Right-clicking, `Ctrl+Click`, two-finger clicking, or long-pressing a **widget** enters `EDIT_MODE` for that widget ONLY (suppressing the canvas context menu). Displays a centered `Reconfigure | Remove` pill inside the widget bounds, 4 centered perimeter resize handles with native desktop resize cursors (`↔` / `↕`) and live emerald outline preview (hit-testing restricted to the pill zone to prevent accidental resize hijacking), and interior drag-to-move with **Desktop-Style Cascade Displacement**:
+    - **Cascade Displacement:** The dragged widget takes the target cell without altering its span; displaced widgets keep their dimensions and cascade in column-major order (downward first, then next column right, then next page top-left, auto-creating new pages if needed). Vacated space is freed.
+    - **Live Preview:** After hovering over a target cell for 250ms, displaced widgets animate (spring slide) into their cascade positions. Hovering back to the original cell or cancelling reverts all widgets to the drag-start snapshot. Dropping commits and persists atomically.
   - **Bottom Pagination Pill:** Circular page loop (`◄` / `►`), page pills (`1 .. N`) with inline right-click/long-press rename, `+` (Widget Picker), and `⚙` (Overlay Settings).
 
 ---
@@ -50,9 +52,9 @@
 │       │   ├── domain/
 │       │   │   ├── model/           # PlacedWidget, DeckPage, DesktopGridProfile, OverlaySettings
 │       │   │   ├── repository/      # WidgetDeckRepository interface
-│       │   │   └── usecase/         # GridCollisionResolver, EdgePageDragTransferUseCase,
-│       │   │                        # CalculateResponsiveSizesUseCase, WidgetSpanCalculator,
-│       │   │                        # ReconcileOrphanWidgetsUseCase
+│       │   │   └── usecase/         # CascadeDisplacementResolver, GridCollisionResolver,
+│       │   │                        # EdgePageDragTransferUseCase, CalculateResponsiveSizesUseCase,
+│       │   │                        # WidgetSpanCalculator, ReconcileOrphanWidgetsUseCase
 │       │   ├── data/
 │       │   │   ├── local/           # LeafDatabase (Room), PreferencesDataStore, DAOs & Entities
 │       │   │   └── repository/      # DefaultWidgetDeckRepository (atomic transactions + page pruning)

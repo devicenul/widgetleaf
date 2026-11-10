@@ -21,10 +21,12 @@ flowchart TD
 ### 1.1 Domain Layer (`domain/`)
 Pure Kotlin models and deterministic use cases with zero Android UI dependencies:
 - **`DesktopGridProfile` & `DesktopGridProfileResolver`:** Computes responsive grid dimensions (`8×8` on expanded/ultra-wide desktop displays $\ge 840\text{dp}$, `6×6` on medium displays) by dividing usable width and height (after reserving `96dp` bottom HUD clearance and `24dp` margins) evenly across columns and rows so widgets can expand vertically up to the full canvas height.
-- **`GridCollisionResolver`:**
-  - `findFirstAvailableSlot`: First-fit scan across pages `0 .. N` (allocating page `N+1` only when all existing pages are full).
-  - `resolveMoveOrResize`: Displaces intersecting widgets downward/rightward on the current page when a widget is moved or resized, or rejects if out-of-bounds/unresolvable.
-- **`EdgePageDragTransferUseCase`:** Handles dragging a widget across the left (`EdgeDirection.LEFT`) or right (`EdgeDirection.RIGHT`) edge of a page. Bumps to `activePage - 1` (if $> 0$) or `activePage + 1` (auto-creating a new page when dragged off the right edge of the last page).
+- **`CascadeDisplacementResolver`:** Pure, deterministic algorithm for desktop-style cascade widget displacement. When a widget is dropped, moved, or resized onto space occupied by others:
+  - The dragged/placed widget settles at its target cell with its original span preserved (or resized bounds).
+  - Any intersecting widgets keep their spans and search for free spots in COLUMN-MAJOR order (downward first, then next column right, then next page top-left, dynamically creating pages as needed).
+  - Anything they land on gets displaced in the same manner. Vacated cells become available. No compaction is performed.
+- **`GridCollisionResolver`:** Provides `findFirstAvailableSpot` row-by-row scan across active page cells for auto-placement from the catalog.
+- **`EdgePageDragTransferUseCase`:** Handles dragging a widget across the left (`EdgeDirection.LEFT`) or right (`EdgeDirection.RIGHT`) edge of a page. Uses `CascadeDisplacementResolver` when landing on occupied cells of an adjacent page (cascading displaced widgets across pages) and prunes empty source pages.
 - **`CalculateResponsiveSizesUseCase` & `WidgetSpanCalculator`:** Computes multi-orientation `OPTION_APPWIDGET_SIZES` (`ArrayList<SizeF>`) and `min/max` dp bounds for `AppWidgetHostView.updateAppWidgetSize(...)`. Notice that user manual resize in `DeckViewModel.resizeWidget` and `WidgetEditResizeFrame` is bounded only by the grid dimensions (`1 .. gridProfile.columns/rows`), never artificially capped by provider `maxResizeWidth`/`maxResizeHeight`.
 
 ### 1.2 Data Layer (`data/`)
@@ -45,11 +47,21 @@ Pure Kotlin models and deterministic use cases with zero Android UI dependencies
 
 ### 1.4 UI Layer (`ui/`)
 - **`WidgetDeckActivity`:** Single-instance translucent overlay activity. Hosts `WidgetDeckHost` (`AppWidgetHost`), handles the system `ACTION_APPWIDGET_BIND` and configuration result flows, applies window blur via `AndroidWindowBlurController`, and handles keyboard navigation (`Left`/`Right`/`PageUp`/`PageDown`, `1..9`/`0`, `Delete`, and `Escape` / any non-UI key to dismiss when no modal/editor is active).
+- **`DeckViewModel` & `DeckUiState`:** Manages overlay state and drag sessions.
+  - `startWidgetDrag(appWidgetId)`: Captures snapshot of all widgets and page count at drag start.
+  - `onWidgetHoverCellChanged(appWidgetId, cellX, cellY)`: 250ms debounced preview computation running `CascadeDisplacementResolver` against snapshot; immediately reverts if hovering back on start cell.
+  - `commitWidgetDrag(appWidgetId, cellX, cellY)`: Cancels debounce, immediately executes cascade resolution from snapshot, extends pages, and atomically persists via `repository.replaceDeckState`.
+  - `cancelWidgetDrag()`: Clears preview and reverts all positions.
+  - Separates `moveWidget` (preserves all spans) from `resizeWidget` (updates bounds).
+  - Exposes `effectiveWidgets` and `effectivePages` for UI rendering and pagination HUD.
 - **`DeckAppWidgetHostView`:** Custom `AppWidgetHostView` subclass with two modes:
   - `INTERACTIVE`: Standard widget click/scroll dispatch; intercepts secondary/Ctrl clicks and long-presses to enter `EDIT_MODE`.
   - `EDIT_MODE`: `dispatchTouchEvent` returns `false` so Compose owns 100% of pointer drag, resize, and button click events above the widget.
 - **`WidgetGridPage` & `WidgetEditResizeFrame` (`GlassSurfaceBox.kt`):**
-  - Renders frameless widgets on the Bento grid.
+  - Renders frameless widgets on the Bento grid with `key(widget.appWidgetId)`.
+  - Non-dragged widgets animate position changes with spring physics (`PAGE_FLIP_SPRING_DAMPING`, `PAGE_FLIP_SPRING_STIFFNESS`); dragged widget uses `snap()` on drop.
+  - Anchors the dragged widget's static base offset at its drag-start cell throughout the drag (INV-2, INV-12).
+  - Renders a subtle emerald drop-target ghost outline at the hovered target cell during drag.
   - Handles canvas-level vs. widget-level right-click / two-finger click / long-press detection.
   - Uses a dedicated z-order hit overlay in edit mode (`testTag("placed_widget_$id")`) drawn above `AndroidView` to guarantee Move drags are never claimed or cancelled by remote view touch dispatch.
-  - Renders the emerald edit frame, centered `Reconfigure | Remove` action pill, and 4 edge resize handles with live resize preview and native desktop resize cursors (`TYPE_VERTICAL_DOUBLE_ARROW`, `TYPE_HORIZONTAL_DOUBLE_ARROW`, `TYPE_ALL_SCROLL`).
+  - Renders the emerald edit frame, centered `Reconfigure | Remove` action pill, and 4 centered perimeter resize handles (~64×20dp / 20×64dp hit area) with live resize preview and native desktop resize cursors (`TYPE_VERTICAL_DOUBLE_ARROW`, `TYPE_HORIZONTAL_DOUBLE_ARROW`, `TYPE_ALL_SCROLL`).

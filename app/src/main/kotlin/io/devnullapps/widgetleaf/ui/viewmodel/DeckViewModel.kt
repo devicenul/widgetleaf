@@ -10,13 +10,15 @@ import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 import io.devnullapps.widgetleaf.domain.model.WidgetCatalogItem
 import io.devnullapps.widgetleaf.domain.repository.WidgetDeckRepository
 import io.devnullapps.widgetleaf.domain.usecase.CalculateResponsiveSizesUseCase
+import io.devnullapps.widgetleaf.domain.usecase.CascadeDisplacementResolver
 import io.devnullapps.widgetleaf.domain.usecase.EdgeDirection
 import io.devnullapps.widgetleaf.domain.usecase.EdgePageDragTransferUseCase
 import io.devnullapps.widgetleaf.domain.usecase.EdgeTransferResult
 import io.devnullapps.widgetleaf.domain.usecase.GridCollisionResolver
-import io.devnullapps.widgetleaf.domain.usecase.PlacementResult
 import io.devnullapps.widgetleaf.domain.usecase.ReconcileOrphanWidgetsUseCase
 import io.devnullapps.widgetleaf.platform.WidgetHostGateway
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,11 +34,17 @@ class DeckViewModel(
     ),
     private val calculateResponsiveSizesUseCase: CalculateResponsiveSizesUseCase = CalculateResponsiveSizesUseCase(),
     private val edgePageDragTransferUseCase: EdgePageDragTransferUseCase = EdgePageDragTransferUseCase(),
+    private val cascadeDisplacementResolver: CascadeDisplacementResolver = CascadeDisplacementResolver(),
     private val gridCollisionResolver: GridCollisionResolver = GridCollisionResolver()
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DeckUiState())
     val uiState: StateFlow<DeckUiState> = _uiState.asStateFlow()
+
+    private var dragSnapshotWidgets: List<PlacedWidget>? = null
+    private var dragSnapshotPageCount: Int = 0
+    private var dragDebounceJob: Job? = null
+    private var draggingWidgetStartCell: Pair<Int, Int>? = null
 
     init {
         viewModelScope.launch {
@@ -249,13 +257,15 @@ class DeckViewModel(
     ) {
         val profile = _uiState.value.gridProfile
         val appWidgetId = widgetHostGateway.allocateAppWidgetId()
+        val clampedCellX = cellX.coerceIn(0, (profile.columns - item.defaultSpanX).coerceAtLeast(0))
+        val clampedCellY = cellY.coerceIn(0, (profile.rows - item.defaultSpanY).coerceAtLeast(0))
         val candidate = PlacedWidget(
             appWidgetId = appWidgetId,
             providerPackage = item.providerPackage,
             providerClass = item.providerClass,
             pageIndex = pageIndex,
-            cellX = cellX,
-            cellY = cellY,
+            cellX = clampedCellX,
+            cellY = clampedCellY,
             spanX = item.defaultSpanX,
             spanY = item.defaultSpanY,
             minSpanX = item.minSpanX,
@@ -267,22 +277,29 @@ class DeckViewModel(
             label = item.widgetLabel
         )
 
-        val existingOnPage = _uiState.value.widgets.filter { it.pageIndex == pageIndex }
-        val result = gridCollisionResolver.resolvePlacement(candidate, existingOnPage, profile.columns, profile.rows)
-        when (result) {
-            is PlacementResult.Rejected -> {
-                widgetHostGateway.deleteAppWidgetId(appWidgetId)
-                _uiState.update { it.copy(draggingCatalogItem = null) }
-            }
-            is PlacementResult.Accepted -> {
-                proceedWidgetPlacement(candidate, result.updatedWidgets)
-            }
+        val allWidgets = _uiState.value.widgets
+        val effectivePageCount = maxOf(_uiState.value.pages.size, pageIndex + 1)
+        val result = cascadeDisplacementResolver.resolve(
+            dragged = candidate,
+            allWidgets = allWidgets,
+            columns = profile.columns,
+            rows = profile.rows,
+            pageCount = effectivePageCount
+        )
+
+        if (result == null) {
+            widgetHostGateway.deleteAppWidgetId(appWidgetId)
+            _uiState.update { it.copy(draggingCatalogItem = null) }
+            return
         }
+
+        proceedWidgetPlacement(candidate, result.widgets, result.pageCount)
     }
 
     private fun proceedWidgetPlacement(
         candidate: PlacedWidget,
-        displacedWidgetsOnPage: List<PlacedWidget>? = null
+        resolvedWidgets: List<PlacedWidget>? = null,
+        resolvedPageCount: Int? = null
     ) {
         val bound = widgetHostGateway.bindAppWidgetIdIfAllowed(
             candidate.appWidgetId,
@@ -297,7 +314,9 @@ class DeckViewModel(
                         appWidgetId = candidate.appWidgetId,
                         providerPackage = candidate.providerPackage,
                         providerClass = candidate.providerClass,
-                        candidateWidget = candidate
+                        candidateWidget = candidate,
+                        resolvedWidgets = resolvedWidgets,
+                        resolvedPageCount = resolvedPageCount
                     )
                 )
             }
@@ -310,14 +329,16 @@ class DeckViewModel(
                     isLaunchingInternalFlow = true,
                     pendingWidgetAction = PendingWidgetAction.RequestConfigure(
                         appWidgetId = candidate.appWidgetId,
-                        candidateWidget = candidate
+                        candidateWidget = candidate,
+                        resolvedWidgets = resolvedWidgets,
+                        resolvedPageCount = resolvedPageCount
                     )
                 )
             }
             return
         }
 
-        finalizeWidgetPlacement(candidate, displacedWidgetsOnPage)
+        finalizeWidgetPlacement(candidate, resolvedWidgets, resolvedPageCount)
     }
 
     fun onBindWidgetResult(appWidgetId: Int, granted: Boolean) {
@@ -338,18 +359,22 @@ class DeckViewModel(
         }
 
         val candidate = pending.candidateWidget
+        val resolvedWidgets = pending.resolvedWidgets
+        val resolvedPageCount = pending.resolvedPageCount
         if (widgetHostGateway.hasConfigurationActivity(appWidgetId)) {
             _uiState.update {
                 it.copy(
                     isLaunchingInternalFlow = true,
                     pendingWidgetAction = PendingWidgetAction.RequestConfigure(
                         appWidgetId = appWidgetId,
-                        candidateWidget = candidate
+                        candidateWidget = candidate,
+                        resolvedWidgets = resolvedWidgets,
+                        resolvedPageCount = resolvedPageCount
                     )
                 )
             }
         } else {
-            finalizeWidgetPlacement(candidate)
+            finalizeWidgetPlacement(candidate, resolvedWidgets, resolvedPageCount)
         }
     }
 
@@ -370,12 +395,13 @@ class DeckViewModel(
             return
         }
 
-        finalizeWidgetPlacement(pending.candidateWidget)
+        finalizeWidgetPlacement(pending.candidateWidget, pending.resolvedWidgets, pending.resolvedPageCount)
     }
 
     private fun finalizeWidgetPlacement(
         candidate: PlacedWidget,
-        displacedWidgetsOnPage: List<PlacedWidget>? = null
+        resolvedWidgets: List<PlacedWidget>? = null,
+        resolvedPageCount: Int? = null
     ) {
         val profile = _uiState.value.gridProfile
         val sizes = calculateResponsiveSizesUseCase(candidate.spanX, candidate.spanY, profile)
@@ -390,55 +416,29 @@ class DeckViewModel(
 
         val currentPages = _uiState.value.pages
         val targetPageIndex = candidate.pageIndex
+        val requiredPageCount = maxOf(resolvedPageCount ?: (targetPageIndex + 1), currentPages.size)
 
-        if (targetPageIndex >= currentPages.size) {
-            val newPages = currentPages.toMutableList()
-            while (newPages.size <= targetPageIndex) {
-                newPages.add(DeckPage(pageIndex = newPages.size, customLabel = null))
-            }
-            val updatedWidgets = if (displacedWidgetsOnPage != null) {
-                _uiState.value.widgets.filter { it.pageIndex != targetPageIndex } + displacedWidgetsOnPage
-            } else {
-                _uiState.value.widgets + candidate
-            }
-            _uiState.update { current ->
-                current.copy(
-                    pages = newPages,
-                    widgets = updatedWidgets,
-                    activePageIndex = targetPageIndex,
-                    isWidgetPickerOpen = false,
-                    draggingCatalogItem = null,
-                    isLaunchingInternalFlow = false,
-                    pendingWidgetAction = null
-                )
-            }
-            viewModelScope.launch {
-                repository.replaceDeckState(newPages, updatedWidgets)
-            }
-        } else {
-            val updatedWidgets = if (displacedWidgetsOnPage != null) {
-                val others = _uiState.value.widgets.filter { it.pageIndex != targetPageIndex }
-                others + displacedWidgetsOnPage
-            } else {
-                _uiState.value.widgets.filter { it.appWidgetId != candidate.appWidgetId } + candidate
-            }
-            _uiState.update { current ->
-                current.copy(
-                    widgets = updatedWidgets,
-                    activePageIndex = targetPageIndex,
-                    isWidgetPickerOpen = false,
-                    draggingCatalogItem = null,
-                    isLaunchingInternalFlow = false,
-                    pendingWidgetAction = null
-                )
-            }
-            viewModelScope.launch {
-                if (displacedWidgetsOnPage != null) {
-                    repository.upsertWidgets(displacedWidgetsOnPage)
-                } else {
-                    repository.upsertWidget(candidate)
-                }
-            }
+        val newPages = currentPages.toMutableList()
+        while (newPages.size < requiredPageCount) {
+            newPages.add(DeckPage(pageIndex = newPages.size, customLabel = null))
+        }
+
+        val updatedWidgets = resolvedWidgets ?: (_uiState.value.widgets.filter { it.appWidgetId != candidate.appWidgetId } + candidate)
+
+        _uiState.update { current ->
+            current.copy(
+                pages = newPages,
+                widgets = updatedWidgets,
+                activePageIndex = targetPageIndex,
+                isWidgetPickerOpen = false,
+                draggingCatalogItem = null,
+                isLaunchingInternalFlow = false,
+                pendingWidgetAction = null
+            )
+        }
+
+        viewModelScope.launch {
+            repository.replaceDeckState(newPages, updatedWidgets)
         }
     }
 
@@ -461,6 +461,259 @@ class DeckViewModel(
         _uiState.update { it.copy(isLaunchingInternalFlow = launching) }
     }
 
+    // --- Drag Session API (Live Cascade Displacement Preview & Commit) ---
+
+    fun startWidgetDrag(appWidgetId: Int) {
+        dragDebounceJob?.cancel()
+        val currentWidgets = _uiState.value.widgets
+        val dragged = currentWidgets.find { it.appWidgetId == appWidgetId }
+        dragSnapshotWidgets = currentWidgets
+        dragSnapshotPageCount = _uiState.value.pages.size
+        draggingWidgetStartCell = if (dragged != null) Pair(dragged.cellX, dragged.cellY) else null
+
+        _uiState.update {
+            it.copy(
+                draggingWidgetId = appWidgetId,
+                previewWidgets = null,
+                previewPageCount = null,
+                displacedWidgetIds = emptySet(),
+                hoveredCell = null
+            )
+        }
+    }
+
+    fun onWidgetHoverCellChanged(appWidgetId: Int, cellX: Int, cellY: Int) {
+        dragDebounceJob?.cancel()
+
+        val startCell = draggingWidgetStartCell
+
+        if (startCell != null && cellX == startCell.first && cellY == startCell.second) {
+            // Hovered back on the drag-start cell: revert preview immediately
+            _uiState.update {
+                it.copy(
+                    hoveredCell = Pair(cellX, cellY),
+                    previewWidgets = null,
+                    previewPageCount = null,
+                    displacedWidgetIds = emptySet()
+                )
+            }
+            return
+        }
+
+        _uiState.update {
+            it.copy(hoveredCell = Pair(cellX, cellY))
+        }
+
+        dragDebounceJob = viewModelScope.launch {
+            delay(250L)
+            val currentSnapshot = dragSnapshotWidgets ?: return@launch
+            val orig = currentSnapshot.find { it.appWidgetId == appWidgetId } ?: return@launch
+            val profile = _uiState.value.gridProfile
+            val clampedCellX = cellX.coerceIn(0, (profile.columns - orig.spanX).coerceAtLeast(0))
+            val clampedCellY = cellY.coerceIn(0, (profile.rows - orig.spanY).coerceAtLeast(0))
+            val targetWidget = orig.copy(cellX = clampedCellX, cellY = clampedCellY)
+
+            val result = cascadeDisplacementResolver.resolve(
+                dragged = targetWidget,
+                allWidgets = currentSnapshot,
+                columns = profile.columns,
+                rows = profile.rows,
+                pageCount = dragSnapshotPageCount
+            )
+
+            if (result != null) {
+                _uiState.update { current ->
+                    current.copy(
+                        previewWidgets = result.widgets,
+                        previewPageCount = result.pageCount,
+                        displacedWidgetIds = result.movedWidgetIds
+                    )
+                }
+            }
+        }
+    }
+
+    fun commitWidgetDrag(appWidgetId: Int, cellX: Int, cellY: Int) {
+        dragDebounceJob?.cancel()
+        dragDebounceJob = null
+
+        val snapshot = dragSnapshotWidgets ?: _uiState.value.widgets
+        val pageCount = if (dragSnapshotPageCount > 0) dragSnapshotPageCount else _uiState.value.pages.size
+        dragSnapshotWidgets = null
+        dragSnapshotPageCount = 0
+        draggingWidgetStartCell = null
+
+        val orig = snapshot.find { it.appWidgetId == appWidgetId }
+        if (orig == null) {
+            cancelWidgetDrag()
+            return
+        }
+
+        val profile = _uiState.value.gridProfile
+        val clampedCellX = cellX.coerceIn(0, (profile.columns - orig.spanX).coerceAtLeast(0))
+        val clampedCellY = cellY.coerceIn(0, (profile.rows - orig.spanY).coerceAtLeast(0))
+        val targetWidget = orig.copy(cellX = clampedCellX, cellY = clampedCellY)
+
+        val result = cascadeDisplacementResolver.resolve(
+            dragged = targetWidget,
+            allWidgets = snapshot,
+            columns = profile.columns,
+            rows = profile.rows,
+            pageCount = pageCount
+        )
+
+        if (result != null) {
+            val currentPages = _uiState.value.pages
+            val newPages = currentPages.toMutableList()
+            while (newPages.size < result.pageCount) {
+                newPages.add(DeckPage(pageIndex = newPages.size, customLabel = null))
+            }
+            _uiState.update { current ->
+                current.copy(
+                    pages = newPages,
+                    widgets = result.widgets,
+                    previewWidgets = null,
+                    previewPageCount = null,
+                    displacedWidgetIds = emptySet(),
+                    draggingWidgetId = null,
+                    hoveredCell = null
+                )
+            }
+            viewModelScope.launch {
+                repository.replaceDeckState(newPages, result.widgets)
+            }
+        } else {
+            cancelWidgetDrag()
+        }
+    }
+
+    fun cancelWidgetDrag() {
+        dragDebounceJob?.cancel()
+        dragDebounceJob = null
+        dragSnapshotWidgets = null
+        dragSnapshotPageCount = 0
+        draggingWidgetStartCell = null
+
+        _uiState.update { current ->
+            current.copy(
+                previewWidgets = null,
+                previewPageCount = null,
+                displacedWidgetIds = emptySet(),
+                draggingWidgetId = null,
+                hoveredCell = null
+            )
+        }
+    }
+
+    fun moveWidget(
+        appWidgetId: Int,
+        newCellX: Int,
+        newCellY: Int
+    ) {
+        val allWidgets = _uiState.value.widgets
+        val current = allWidgets.find { it.appWidgetId == appWidgetId } ?: return
+        val profile = _uiState.value.gridProfile
+        val clampedCellX = newCellX.coerceIn(0, (profile.columns - current.spanX).coerceAtLeast(0))
+        val clampedCellY = newCellY.coerceIn(0, (profile.rows - current.spanY).coerceAtLeast(0))
+
+        val target = current.copy(
+            cellX = clampedCellX,
+            cellY = clampedCellY
+            // spanX, spanY, min/maxSpan are NEVER modified on move
+        )
+
+        val result = cascadeDisplacementResolver.resolve(
+            dragged = target,
+            allWidgets = allWidgets,
+            columns = profile.columns,
+            rows = profile.rows,
+            pageCount = _uiState.value.pages.size
+        ) ?: return
+
+        val currentPages = _uiState.value.pages
+        val newPages = currentPages.toMutableList()
+        while (newPages.size < result.pageCount) {
+            newPages.add(DeckPage(pageIndex = newPages.size, customLabel = null))
+        }
+
+        _uiState.update {
+            it.copy(
+                pages = newPages,
+                widgets = result.widgets,
+                previewWidgets = null,
+                previewPageCount = null,
+                displacedWidgetIds = emptySet(),
+                draggingWidgetId = null,
+                hoveredCell = null
+            )
+        }
+        viewModelScope.launch {
+            repository.replaceDeckState(newPages, result.widgets)
+        }
+    }
+
+    fun resizeWidget(
+        appWidgetId: Int,
+        newCellX: Int,
+        newCellY: Int,
+        newSpanX: Int,
+        newSpanY: Int
+    ) {
+        val allWidgets = _uiState.value.widgets
+        val current = allWidgets.find { it.appWidgetId == appWidgetId } ?: return
+        val profile = _uiState.value.gridProfile
+        val clampedSpanX = newSpanX.coerceIn(1, profile.columns)
+        val clampedSpanY = newSpanY.coerceIn(1, profile.rows)
+        val clampedCellX = newCellX.coerceIn(0, (profile.columns - clampedSpanX).coerceAtLeast(0))
+        val clampedCellY = newCellY.coerceIn(0, (profile.rows - clampedSpanY).coerceAtLeast(0))
+
+        val target = current.copy(
+            cellX = clampedCellX,
+            cellY = clampedCellY,
+            spanX = clampedSpanX,
+            spanY = clampedSpanY
+        )
+
+        val result = cascadeDisplacementResolver.resolve(
+            dragged = target,
+            allWidgets = allWidgets,
+            columns = profile.columns,
+            rows = profile.rows,
+            pageCount = _uiState.value.pages.size
+        ) ?: return
+
+        val currentPages = _uiState.value.pages
+        val newPages = currentPages.toMutableList()
+        while (newPages.size < result.pageCount) {
+            newPages.add(DeckPage(pageIndex = newPages.size, customLabel = null))
+        }
+
+        _uiState.update {
+            it.copy(
+                pages = newPages,
+                widgets = result.widgets,
+                previewWidgets = null,
+                previewPageCount = null,
+                displacedWidgetIds = emptySet(),
+                draggingWidgetId = null,
+                hoveredCell = null
+            )
+        }
+        viewModelScope.launch {
+            repository.replaceDeckState(newPages, result.widgets)
+        }
+
+        val sizes = calculateResponsiveSizesUseCase(target.spanX, target.spanY, profile)
+        widgetHostGateway.updateAppWidgetSizes(
+            appWidgetId = target.appWidgetId,
+            sizesDp = sizes.responsiveSizes,
+            minWidthDp = sizes.minWidthDp,
+            minHeightDp = sizes.minHeightDp,
+            maxWidthDp = sizes.maxWidthDp,
+            maxHeightDp = sizes.maxHeightDp
+        )
+    }
+
     fun moveOrResizeWidget(
         appWidgetId: Int,
         newCellX: Int,
@@ -469,44 +722,10 @@ class DeckViewModel(
         newSpanY: Int
     ) {
         val current = _uiState.value.widgets.find { it.appWidgetId == appWidgetId } ?: return
-        val profile = _uiState.value.gridProfile
-        val clampedSpanX = newSpanX.coerceIn(1, profile.columns)
-        val clampedSpanY = newSpanY.coerceIn(1, profile.rows)
-        val clampedCellX = newCellX.coerceIn(0, profile.columns - clampedSpanX)
-        val clampedCellY = newCellY.coerceIn(0, profile.rows - clampedSpanY)
-
-        val target = current.copy(
-            cellX = clampedCellX,
-            cellY = clampedCellY,
-            spanX = clampedSpanX,
-            spanY = clampedSpanY,
-            minSpanX = 1,
-            minSpanY = 1,
-            maxSpanX = maxOf(current.maxSpanX, profile.columns),
-            maxSpanY = maxOf(current.maxSpanY, profile.rows)
-        )
-
-        val pageWidgets = _uiState.value.widgets.filter { it.pageIndex == current.pageIndex }
-        val result = gridCollisionResolver.resolvePlacement(target, pageWidgets, profile.columns, profile.rows)
-
-        if (result is PlacementResult.Accepted) {
-            val otherWidgets = _uiState.value.widgets.filter { it.pageIndex != current.pageIndex }
-            val allWidgets = otherWidgets + result.updatedWidgets
-            _uiState.update { it.copy(widgets = allWidgets) }
-            viewModelScope.launch {
-                repository.upsertWidgets(result.updatedWidgets)
-            }
-            for (w in result.updatedWidgets) {
-                val sizes = calculateResponsiveSizesUseCase(w.spanX, w.spanY, profile)
-                widgetHostGateway.updateAppWidgetSizes(
-                    appWidgetId = w.appWidgetId,
-                    sizesDp = sizes.responsiveSizes,
-                    minWidthDp = sizes.minWidthDp,
-                    minHeightDp = sizes.minHeightDp,
-                    maxWidthDp = sizes.maxWidthDp,
-                    maxHeightDp = sizes.maxHeightDp
-                )
-            }
+        if (current.spanX == newSpanX && current.spanY == newSpanY) {
+            moveWidget(appWidgetId, newCellX, newCellY)
+        } else {
+            resizeWidget(appWidgetId, newCellX, newCellY, newSpanX, newSpanY)
         }
     }
 
@@ -534,7 +753,12 @@ class DeckViewModel(
                     it.copy(
                         pages = result.pages,
                         widgets = result.widgets,
-                        activePageIndex = targetIndex
+                        activePageIndex = targetIndex,
+                        previewWidgets = null,
+                        previewPageCount = null,
+                        displacedWidgetIds = emptySet(),
+                        draggingWidgetId = null,
+                        hoveredCell = null
                     )
                 }
                 viewModelScope.launch {
@@ -556,7 +780,7 @@ class DeckViewModel(
             is EdgeTransferResult.BlockedAtLeftEdge -> {
                 val current = state.widgets.find { it.appWidgetId == appWidgetId }
                 if (current != null) {
-                    moveOrResizeWidget(appWidgetId, 0, targetCellY, current.spanX, current.spanY)
+                    moveWidget(appWidgetId, 0, targetCellY)
                 }
             }
             is EdgeTransferResult.RejectedFullPage -> Unit

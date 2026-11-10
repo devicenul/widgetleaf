@@ -42,6 +42,15 @@
   3. When long-press timeout triggers on a placed widget in the root canvas detector, it must **never** consume subsequent changes or set `contextMenuOrEditTriggered = true`, allowing the user to seamlessly drag the widget immediately without lifting their finger.
   4. `DeckAppWidgetHostView` must reset `isLongPressTriggered = false` on `interactionMode = EDIT_MODE`, `ACTION_UP`, and `ACTION_CANCEL`, ensuring it never gets stuck in `return true`.
 
+### INV-12: Desktop Cascade Displacement & Drag Preview Invariants
+- **Why:** In desktop-style cascade displacement, dragging a widget onto occupied space must displace other widgets without altering any widget's size. Displaced widgets must animate smoothly during drag hover previews, revert cleanly on hover-out/cancel, and never produce 1-frame snap-back flicker or pointer oscillation.
+- **Rule:**
+  1. **Anchor Dragged Widget Base Offset:** During a drag session, the dragged widget's static base offset `(leftDp, topDp)` MUST stay anchored at `dragStartCell` throughout the entire drag. It must NEVER jump to the speculative preview or hovered cell while dragging, as shifting the static base offset mid-drag violates INV-2 and breaks pointer delta tracking.
+  2. **Synchronous Atomic Reset on Commit:** In `onDragEnd` when committing, `moveDragX`, `moveDragY`, and `dragStartCell` are reset in the same frame that `commitWidgetDrag` publishes the committed cell to `uiState.widgets`. This eliminates 1-frame snap-back flicker where the widget would otherwise snap to the old start position before jumping to the committed position.
+  3. **Displaced Spring Slide vs. Dragged Snap:** Non-dragged widgets animate position changes with spring physics (`PAGE_FLIP_SPRING_DAMPING`, `PAGE_FLIP_SPRING_STIFFNESS`) keyed by `key(widget.appWidgetId)`. The dragged widget uses `snap()` on drop because its visual placement was already continuously aligned with the pointer.
+  4. **Strict Move vs. Resize Separation:** `moveWidget` (and drag moves) strictly preserves `spanX`, `spanY`, `minSpanX`, `minSpanY`, `maxSpanX`, and `maxSpanY`. Widgets NEVER resize as a result of being moved or displaced. Only `resizeWidget` can modify spans.
+  5. **Resize Handle Hit Area Restriction:** In `WidgetEditResizeFrame` (`GlassSurfaceBox.kt`), perimeter resize handles must be restricted to centered pill zones (~64×20dp and 20×64dp) with modest hit padding rather than full-length edges, preventing accidental resize hijacking when grabbing near a widget border to move it.
+
 ---
 
 ## 2. Overlay Dismissal & Lifecycle Invariants

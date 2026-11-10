@@ -103,6 +103,7 @@ class WidgetDeckActivity : ComponentActivity() {
                         reconcileOrphanWidgetsUseCase = container.reconcileOrphanWidgetsUseCase,
                         calculateResponsiveSizesUseCase = container.calculateResponsiveSizesUseCase,
                         edgePageDragTransferUseCase = container.edgePageDragTransferUseCase,
+                        cascadeDisplacementResolver = container.cascadeDisplacementResolver,
                         gridCollisionResolver = container.gridCollisionResolver
                     ) as T
                 }
@@ -294,15 +295,16 @@ class WidgetDeckActivity : ComponentActivity() {
                 onExitEditMode = viewModel::exitWidgetEditMode,
                 onMoveWidget = { id, x, y ->
                     lastWidgetMutationOrFlowUptimeMs = SystemClock.uptimeMillis()
-                    val w = uiState.widgets.find { it.appWidgetId == id }
-                    if (w != null) {
-                        viewModel.moveOrResizeWidget(id, x, y, w.spanX, w.spanY)
-                    }
+                    viewModel.moveWidget(id, x, y)
                 },
                 onResizeWidget = { id, x, y, sx, sy ->
                     lastWidgetMutationOrFlowUptimeMs = SystemClock.uptimeMillis()
-                    viewModel.moveOrResizeWidget(id, x, y, sx, sy)
+                    viewModel.resizeWidget(id, x, y, sx, sy)
                 },
+                onStartWidgetDrag = viewModel::startWidgetDrag,
+                onWidgetHoverCellChanged = viewModel::onWidgetHoverCellChanged,
+                onCommitWidgetDrag = viewModel::commitWidgetDrag,
+                onCancelWidgetDrag = viewModel::cancelWidgetDrag,
                 onDragAcrossEdge = viewModel::dragWidgetAcrossEdge,
                 onRemoveWidget = { id ->
                     lastWidgetMutationOrFlowUptimeMs = SystemClock.uptimeMillis()
