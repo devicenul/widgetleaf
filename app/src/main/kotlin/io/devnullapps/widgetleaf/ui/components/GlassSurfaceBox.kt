@@ -138,6 +138,9 @@ fun WidgetEditResizeFrame(
     onRemoveWidget: (appWidgetId: Int) -> Unit,
     onReconfigureWidget: ((appWidgetId: Int) -> Unit)? = null,
     onResizePreviewChange: (leftDeltaPx: Float, topDeltaPx: Float, rightDeltaPx: Float, bottomDeltaPx: Float) -> Unit = { _, _, _, _ -> },
+    onStartResize: () -> Unit = {},
+    onResizeBoundsChange: (newCellX: Int, newCellY: Int, newSpanX: Int, newSpanY: Int) -> Unit = { _, _, _, _ -> },
+    onCancelResize: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (!isEditing) return
@@ -153,6 +156,9 @@ fun WidgetEditResizeFrame(
     val currentStepYPx by rememberUpdatedState(cellStepYPx)
     val currentOnResizeWidget by rememberUpdatedState(onResizeWidget)
     val currentOnResizePreviewChange by rememberUpdatedState(onResizePreviewChange)
+    val currentOnStartResize by rememberUpdatedState(onStartResize)
+    val currentOnResizeBoundsChange by rememberUpdatedState(onResizeBoundsChange)
+    val currentOnCancelResize by rememberUpdatedState(onCancelResize)
 
     val verticalResizeIcon = rememberSystemPointerIcon(
         context,
@@ -162,6 +168,16 @@ fun WidgetEditResizeFrame(
     val horizontalResizeIcon = rememberSystemPointerIcon(
         context,
         android.view.PointerIcon.TYPE_HORIZONTAL_DOUBLE_ARROW,
+        PointerIcon.Hand
+    )
+    val diagonalTlBrIcon = rememberSystemPointerIcon(
+        context,
+        android.view.PointerIcon.TYPE_TOP_LEFT_DIAGONAL_DOUBLE_ARROW,
+        PointerIcon.Hand
+    )
+    val diagonalTrBlIcon = rememberSystemPointerIcon(
+        context,
+        android.view.PointerIcon.TYPE_TOP_RIGHT_DIAGONAL_DOUBLE_ARROW,
         PointerIcon.Hand
     )
 
@@ -292,6 +308,7 @@ fun WidgetEditResizeFrame(
                         detectDragGestures(
                             onDragStart = {
                                 topDragY = 0f
+                                currentOnStartResize()
                                 currentOnResizePreviewChange(0f, 0f, 0f, 0f)
                             },
                             onDrag = { change, dragAmount ->
@@ -300,14 +317,22 @@ fun WidgetEditResizeFrame(
                                 val maxDownwardDragPx = (currentWidget.spanY - minAllowedY) * currentStepYPx
                                 topDragY = (topDragY + dragAmount.y).coerceIn(-maxUpwardDragPx, maxDownwardDragPx)
                                 currentOnResizePreviewChange(0f, topDragY, 0f, 0f)
+
+                                val w = currentWidget
+                                val cellDelta = (topDragY / currentStepYPx).roundToInt()
+                                val maxSpanForCurrentTop = w.cellY + w.spanY
+                                val maxAllowedSpanY = minOf(maxAvailableY, maxSpanForCurrentTop)
+                                val newSpanY = (w.spanY - cellDelta).coerceIn(minAllowedY, maxAllowedSpanY)
+                                val newCellY = (w.cellY + w.spanY) - newSpanY
+                                currentOnResizeBoundsChange(w.cellX, newCellY, w.spanX, newSpanY)
                             },
                             onDragCancel = {
                                 topDragY = 0f
                                 currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                                currentOnCancelResize()
                             },
                             onDragEnd = {
                                 val w = currentWidget
-                                val prof = currentGridProfile
                                 val cellDelta = (topDragY / currentStepYPx).roundToInt()
                                 val maxSpanForCurrentTop = w.cellY + w.spanY
                                 val maxAllowedSpanY = minOf(maxAvailableY, maxSpanForCurrentTop)
@@ -344,6 +369,7 @@ fun WidgetEditResizeFrame(
                         detectDragGestures(
                             onDragStart = {
                                 bottomDragY = 0f
+                                currentOnStartResize()
                                 currentOnResizePreviewChange(0f, 0f, 0f, 0f)
                             },
                             onDrag = { change, dragAmount ->
@@ -352,10 +378,18 @@ fun WidgetEditResizeFrame(
                                 val maxDownwardDragPx = (minOf(maxAvailableY, currentGridProfile.rows - currentWidget.cellY) - currentWidget.spanY) * currentStepYPx
                                 bottomDragY = (bottomDragY + dragAmount.y).coerceIn(-maxUpwardDragPx, maxDownwardDragPx)
                                 currentOnResizePreviewChange(0f, 0f, 0f, bottomDragY)
+
+                                val w = currentWidget
+                                val prof = currentGridProfile
+                                val cellDelta = (bottomDragY / currentStepYPx).roundToInt()
+                                val maxAvailableSpanY = minOf(maxAvailableY, prof.rows - w.cellY)
+                                val newSpanY = (w.spanY + cellDelta).coerceIn(minAllowedY, maxAvailableSpanY)
+                                currentOnResizeBoundsChange(w.cellX, w.cellY, w.spanX, newSpanY)
                             },
                             onDragCancel = {
                                 bottomDragY = 0f
                                 currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                                currentOnCancelResize()
                             },
                             onDragEnd = {
                                 val w = currentWidget
@@ -396,6 +430,7 @@ fun WidgetEditResizeFrame(
                         detectDragGestures(
                             onDragStart = {
                                 leftDragX = 0f
+                                currentOnStartResize()
                                 currentOnResizePreviewChange(0f, 0f, 0f, 0f)
                             },
                             onDrag = { change, dragAmount ->
@@ -404,10 +439,19 @@ fun WidgetEditResizeFrame(
                                 val maxRightwardDragPx = (currentWidget.spanX - minAllowedX) * currentStepXPx
                                 leftDragX = (leftDragX + dragAmount.x).coerceIn(-maxLeftwardDragPx, maxRightwardDragPx)
                                 currentOnResizePreviewChange(leftDragX, 0f, 0f, 0f)
+
+                                val w = currentWidget
+                                val cellDelta = (leftDragX / currentStepXPx).roundToInt()
+                                val maxSpanForCurrentLeft = w.cellX + w.spanX
+                                val maxAllowedSpanX = minOf(maxAvailableX, maxSpanForCurrentLeft)
+                                val newSpanX = (w.spanX - cellDelta).coerceIn(minAllowedX, maxAllowedSpanX)
+                                val newCellX = (w.cellX + w.spanX) - newSpanX
+                                currentOnResizeBoundsChange(newCellX, w.cellY, newSpanX, w.spanY)
                             },
                             onDragCancel = {
                                 leftDragX = 0f
                                 currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                                currentOnCancelResize()
                             },
                             onDragEnd = {
                                 val w = currentWidget
@@ -448,6 +492,7 @@ fun WidgetEditResizeFrame(
                         detectDragGestures(
                             onDragStart = {
                                 rightDragX = 0f
+                                currentOnStartResize()
                                 currentOnResizePreviewChange(0f, 0f, 0f, 0f)
                             },
                             onDrag = { change, dragAmount ->
@@ -456,10 +501,18 @@ fun WidgetEditResizeFrame(
                                 val maxRightwardDragPx = (minOf(maxAvailableX, currentGridProfile.columns - currentWidget.cellX) - currentWidget.spanX) * currentStepXPx
                                 rightDragX = (rightDragX + dragAmount.x).coerceIn(-maxLeftwardDragPx, maxRightwardDragPx)
                                 currentOnResizePreviewChange(0f, 0f, rightDragX, 0f)
+
+                                val w = currentWidget
+                                val prof = currentGridProfile
+                                val cellDelta = (rightDragX / currentStepXPx).roundToInt()
+                                val maxAvailableSpanX = minOf(maxAvailableX, prof.columns - w.cellX)
+                                val newSpanX = (w.spanX + cellDelta).coerceIn(minAllowedX, maxAvailableSpanX)
+                                currentOnResizeBoundsChange(w.cellX, w.cellY, newSpanX, w.spanY)
                             },
                             onDragCancel = {
                                 rightDragX = 0f
                                 currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                                currentOnCancelResize()
                             },
                             onDragEnd = {
                                 val w = currentWidget
@@ -483,6 +536,312 @@ fun WidgetEditResizeFrame(
                         .clip(RoundedCornerShape(4.dp))
                         .background(WidgetLeafTheme.palette.leafBright)
                         .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(4.dp))
+                )
+            }
+        }
+
+        // Four corner drag handles ONLY for RESIZE_BOTH (diagonal cursors, anchor opposite corner)
+        val canResizeBoth = (widget.resizeMode and PlacedWidget.RESIZE_BOTH) == PlacedWidget.RESIZE_BOTH
+        if (canResizeBoth) {
+            // Top-Left corner handle (\ cursor, anchors bottom-right)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .size(28.dp)
+                    .pointerHoverIcon(diagonalTlBrIcon)
+                    .testTag("resize_handle_top_left_${widget.appWidgetId}")
+                    .pointerInput(widget.appWidgetId) {
+                        detectDragGestures(
+                            onDragStart = {
+                                leftDragX = 0f
+                                topDragY = 0f
+                                currentOnStartResize()
+                                currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val maxLeftwardDragPx = minOf(maxAvailableX - currentWidget.spanX, currentWidget.cellX) * currentStepXPx
+                                val maxRightwardDragPx = (currentWidget.spanX - minAllowedX) * currentStepXPx
+                                leftDragX = (leftDragX + dragAmount.x).coerceIn(-maxLeftwardDragPx, maxRightwardDragPx)
+
+                                val maxUpwardDragPx = minOf(maxAvailableY - currentWidget.spanY, currentWidget.cellY) * currentStepYPx
+                                val maxDownwardDragPx = (currentWidget.spanY - minAllowedY) * currentStepYPx
+                                topDragY = (topDragY + dragAmount.y).coerceIn(-maxUpwardDragPx, maxDownwardDragPx)
+
+                                currentOnResizePreviewChange(leftDragX, topDragY, 0f, 0f)
+
+                                val w = currentWidget
+                                val cellDeltaX = (leftDragX / currentStepXPx).roundToInt()
+                                val cellDeltaY = (topDragY / currentStepYPx).roundToInt()
+                                val maxAllowedSpanX = minOf(maxAvailableX, w.cellX + w.spanX)
+                                val maxAllowedSpanY = minOf(maxAvailableY, w.cellY + w.spanY)
+                                val newSpanX = (w.spanX - cellDeltaX).coerceIn(minAllowedX, maxAllowedSpanX)
+                                val newSpanY = (w.spanY - cellDeltaY).coerceIn(minAllowedY, maxAllowedSpanY)
+                                val newCellX = (w.cellX + w.spanX) - newSpanX
+                                val newCellY = (w.cellY + w.spanY) - newSpanY
+                                currentOnResizeBoundsChange(newCellX, newCellY, newSpanX, newSpanY)
+                            },
+                            onDragCancel = {
+                                leftDragX = 0f
+                                topDragY = 0f
+                                currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                                currentOnCancelResize()
+                            },
+                            onDragEnd = {
+                                val w = currentWidget
+                                val cellDeltaX = (leftDragX / currentStepXPx).roundToInt()
+                                val cellDeltaY = (topDragY / currentStepYPx).roundToInt()
+                                val maxAllowedSpanX = minOf(maxAvailableX, w.cellX + w.spanX)
+                                val maxAllowedSpanY = minOf(maxAvailableY, w.cellY + w.spanY)
+                                val newSpanX = (w.spanX - cellDeltaX).coerceIn(minAllowedX, maxAllowedSpanX)
+                                val newSpanY = (w.spanY - cellDeltaY).coerceIn(minAllowedY, maxAllowedSpanY)
+                                val newCellX = (w.cellX + w.spanX) - newSpanX
+                                val newCellY = (w.cellY + w.spanY) - newSpanY
+                                leftDragX = 0f
+                                topDragY = 0f
+                                currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                                currentOnResizeWidget(newCellX, newCellY, newSpanX, newSpanY)
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.TopStart
+            ) {
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(leftDragX.roundToInt(), topDragY.roundToInt()) }
+                        .padding(start = 3.dp, top = 3.dp)
+                        .size(8.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(leafBrightColor)
+                        .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(2.dp))
+                )
+            }
+
+            // Top-Right corner handle (/ cursor, anchors bottom-left)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(28.dp)
+                    .pointerHoverIcon(diagonalTrBlIcon)
+                    .testTag("resize_handle_top_right_${widget.appWidgetId}")
+                    .pointerInput(widget.appWidgetId) {
+                        detectDragGestures(
+                            onDragStart = {
+                                rightDragX = 0f
+                                topDragY = 0f
+                                currentOnStartResize()
+                                currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val maxLeftwardDragPx = (currentWidget.spanX - minAllowedX) * currentStepXPx
+                                val maxRightwardDragPx = (minOf(maxAvailableX, currentGridProfile.columns - currentWidget.cellX) - currentWidget.spanX) * currentStepXPx
+                                rightDragX = (rightDragX + dragAmount.x).coerceIn(-maxLeftwardDragPx, maxRightwardDragPx)
+
+                                val maxUpwardDragPx = minOf(maxAvailableY - currentWidget.spanY, currentWidget.cellY) * currentStepYPx
+                                val maxDownwardDragPx = (currentWidget.spanY - minAllowedY) * currentStepYPx
+                                topDragY = (topDragY + dragAmount.y).coerceIn(-maxUpwardDragPx, maxDownwardDragPx)
+
+                                currentOnResizePreviewChange(0f, topDragY, rightDragX, 0f)
+
+                                val w = currentWidget
+                                val prof = currentGridProfile
+                                val cellDeltaX = (rightDragX / currentStepXPx).roundToInt()
+                                val cellDeltaY = (topDragY / currentStepYPx).roundToInt()
+                                val maxAvailableSpanX = minOf(maxAvailableX, prof.columns - w.cellX)
+                                val maxAllowedSpanY = minOf(maxAvailableY, w.cellY + w.spanY)
+                                val newSpanX = (w.spanX + cellDeltaX).coerceIn(minAllowedX, maxAvailableSpanX)
+                                val newSpanY = (w.spanY - cellDeltaY).coerceIn(minAllowedY, maxAllowedSpanY)
+                                val newCellX = w.cellX
+                                val newCellY = (w.cellY + w.spanY) - newSpanY
+                                currentOnResizeBoundsChange(newCellX, newCellY, newSpanX, newSpanY)
+                            },
+                            onDragCancel = {
+                                rightDragX = 0f
+                                topDragY = 0f
+                                currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                                currentOnCancelResize()
+                            },
+                            onDragEnd = {
+                                val w = currentWidget
+                                val prof = currentGridProfile
+                                val cellDeltaX = (rightDragX / currentStepXPx).roundToInt()
+                                val cellDeltaY = (topDragY / currentStepYPx).roundToInt()
+                                val maxAvailableSpanX = minOf(maxAvailableX, prof.columns - w.cellX)
+                                val maxAllowedSpanY = minOf(maxAvailableY, w.cellY + w.spanY)
+                                val newSpanX = (w.spanX + cellDeltaX).coerceIn(minAllowedX, maxAvailableSpanX)
+                                val newSpanY = (w.spanY - cellDeltaY).coerceIn(minAllowedY, maxAllowedSpanY)
+                                val newCellX = w.cellX
+                                val newCellY = (w.cellY + w.spanY) - newSpanY
+                                rightDragX = 0f
+                                topDragY = 0f
+                                currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                                currentOnResizeWidget(newCellX, newCellY, newSpanX, newSpanY)
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.TopEnd
+            ) {
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(rightDragX.roundToInt(), topDragY.roundToInt()) }
+                        .padding(end = 3.dp, top = 3.dp)
+                        .size(8.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(leafBrightColor)
+                        .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(2.dp))
+                )
+            }
+
+            // Bottom-Left corner handle (/ cursor, anchors top-right)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .size(28.dp)
+                    .pointerHoverIcon(diagonalTrBlIcon)
+                    .testTag("resize_handle_bottom_left_${widget.appWidgetId}")
+                    .pointerInput(widget.appWidgetId) {
+                        detectDragGestures(
+                            onDragStart = {
+                                leftDragX = 0f
+                                bottomDragY = 0f
+                                currentOnStartResize()
+                                currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val maxLeftwardDragPx = minOf(maxAvailableX - currentWidget.spanX, currentWidget.cellX) * currentStepXPx
+                                val maxRightwardDragPx = (currentWidget.spanX - minAllowedX) * currentStepXPx
+                                leftDragX = (leftDragX + dragAmount.x).coerceIn(-maxLeftwardDragPx, maxRightwardDragPx)
+
+                                val maxUpwardDragPx = (currentWidget.spanY - minAllowedY) * currentStepYPx
+                                val maxDownwardDragPx = (minOf(maxAvailableY, currentGridProfile.rows - currentWidget.cellY) - currentWidget.spanY) * currentStepYPx
+                                bottomDragY = (bottomDragY + dragAmount.y).coerceIn(-maxUpwardDragPx, maxDownwardDragPx)
+
+                                currentOnResizePreviewChange(leftDragX, 0f, 0f, bottomDragY)
+
+                                val w = currentWidget
+                                val prof = currentGridProfile
+                                val cellDeltaX = (leftDragX / currentStepXPx).roundToInt()
+                                val cellDeltaY = (bottomDragY / currentStepYPx).roundToInt()
+                                val maxAllowedSpanX = minOf(maxAvailableX, w.cellX + w.spanX)
+                                val maxAvailableSpanY = minOf(maxAvailableY, prof.rows - w.cellY)
+                                val newSpanX = (w.spanX - cellDeltaX).coerceIn(minAllowedX, maxAllowedSpanX)
+                                val newSpanY = (w.spanY + cellDeltaY).coerceIn(minAllowedY, maxAvailableSpanY)
+                                val newCellX = (w.cellX + w.spanX) - newSpanX
+                                val newCellY = w.cellY
+                                currentOnResizeBoundsChange(newCellX, newCellY, newSpanX, newSpanY)
+                            },
+                            onDragCancel = {
+                                leftDragX = 0f
+                                bottomDragY = 0f
+                                currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                                currentOnCancelResize()
+                            },
+                            onDragEnd = {
+                                val w = currentWidget
+                                val prof = currentGridProfile
+                                val cellDeltaX = (leftDragX / currentStepXPx).roundToInt()
+                                val cellDeltaY = (bottomDragY / currentStepYPx).roundToInt()
+                                val maxAllowedSpanX = minOf(maxAvailableX, w.cellX + w.spanX)
+                                val maxAvailableSpanY = minOf(maxAvailableY, prof.rows - w.cellY)
+                                val newSpanX = (w.spanX - cellDeltaX).coerceIn(minAllowedX, maxAllowedSpanX)
+                                val newSpanY = (w.spanY + cellDeltaY).coerceIn(minAllowedY, maxAvailableSpanY)
+                                val newCellX = (w.cellX + w.spanX) - newSpanX
+                                val newCellY = w.cellY
+                                leftDragX = 0f
+                                bottomDragY = 0f
+                                currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                                currentOnResizeWidget(newCellX, newCellY, newSpanX, newSpanY)
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.BottomStart
+            ) {
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(leftDragX.roundToInt(), bottomDragY.roundToInt()) }
+                        .padding(start = 3.dp, bottom = 3.dp)
+                        .size(8.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(leafBrightColor)
+                        .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(2.dp))
+                )
+            }
+
+            // Bottom-Right corner handle (\ cursor, anchors top-left)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .size(28.dp)
+                    .pointerHoverIcon(diagonalTlBrIcon)
+                    .testTag("resize_handle_bottom_right_${widget.appWidgetId}")
+                    .pointerInput(widget.appWidgetId) {
+                        detectDragGestures(
+                            onDragStart = {
+                                rightDragX = 0f
+                                bottomDragY = 0f
+                                currentOnStartResize()
+                                currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val maxLeftwardDragPx = (currentWidget.spanX - minAllowedX) * currentStepXPx
+                                val maxRightwardDragPx = (minOf(maxAvailableX, currentGridProfile.columns - currentWidget.cellX) - currentWidget.spanX) * currentStepXPx
+                                rightDragX = (rightDragX + dragAmount.x).coerceIn(-maxLeftwardDragPx, maxRightwardDragPx)
+
+                                val maxUpwardDragPx = (currentWidget.spanY - minAllowedY) * currentStepYPx
+                                val maxDownwardDragPx = (minOf(maxAvailableY, currentGridProfile.rows - currentWidget.cellY) - currentWidget.spanY) * currentStepYPx
+                                bottomDragY = (bottomDragY + dragAmount.y).coerceIn(-maxUpwardDragPx, maxDownwardDragPx)
+
+                                currentOnResizePreviewChange(0f, 0f, rightDragX, bottomDragY)
+
+                                val w = currentWidget
+                                val prof = currentGridProfile
+                                val cellDeltaX = (rightDragX / currentStepXPx).roundToInt()
+                                val cellDeltaY = (bottomDragY / currentStepYPx).roundToInt()
+                                val maxAvailableSpanX = minOf(maxAvailableX, prof.columns - w.cellX)
+                                val maxAvailableSpanY = minOf(maxAvailableY, prof.rows - w.cellY)
+                                val newSpanX = (w.spanX + cellDeltaX).coerceIn(minAllowedX, maxAvailableSpanX)
+                                val newSpanY = (w.spanY + cellDeltaY).coerceIn(minAllowedY, maxAvailableSpanY)
+                                val newCellX = w.cellX
+                                val newCellY = w.cellY
+                                currentOnResizeBoundsChange(newCellX, newCellY, newSpanX, newSpanY)
+                            },
+                            onDragCancel = {
+                                rightDragX = 0f
+                                bottomDragY = 0f
+                                currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                                currentOnCancelResize()
+                            },
+                            onDragEnd = {
+                                val w = currentWidget
+                                val prof = currentGridProfile
+                                val cellDeltaX = (rightDragX / currentStepXPx).roundToInt()
+                                val cellDeltaY = (bottomDragY / currentStepYPx).roundToInt()
+                                val maxAvailableSpanX = minOf(maxAvailableX, prof.columns - w.cellX)
+                                val maxAvailableSpanY = minOf(maxAvailableY, prof.rows - w.cellY)
+                                val newSpanX = (w.spanX + cellDeltaX).coerceIn(minAllowedX, maxAvailableSpanX)
+                                val newSpanY = (w.spanY + cellDeltaY).coerceIn(minAllowedY, maxAvailableSpanY)
+                                val newCellX = w.cellX
+                                val newCellY = w.cellY
+                                rightDragX = 0f
+                                bottomDragY = 0f
+                                currentOnResizePreviewChange(0f, 0f, 0f, 0f)
+                                currentOnResizeWidget(newCellX, newCellY, newSpanX, newSpanY)
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.BottomEnd
+            ) {
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(rightDragX.roundToInt(), bottomDragY.roundToInt()) }
+                        .padding(end = 3.dp, bottom = 3.dp)
+                        .size(8.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(leafBrightColor)
+                        .border(0.5.dp, Color(0xAA0D1117), RoundedCornerShape(2.dp))
                 )
             }
         }

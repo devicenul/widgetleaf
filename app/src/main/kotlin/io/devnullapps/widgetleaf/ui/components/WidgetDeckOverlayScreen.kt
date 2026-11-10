@@ -105,6 +105,10 @@ fun WidgetDeckOverlayScreen(
             onResizeWidget = { id, x, y, sx, sy ->
                 viewModel.resizeWidget(id, x, y, sx, sy)
             },
+            onStartWidgetResize = viewModel::startWidgetResize,
+            onWidgetResizeBoundsChanged = viewModel::onWidgetResizeBoundsChanged,
+            onCommitWidgetResize = viewModel::commitWidgetResize,
+            onCancelWidgetResize = viewModel::cancelWidgetResize,
             onStartWidgetDrag = viewModel::startWidgetDrag,
             onWidgetHoverCellChanged = viewModel::onWidgetHoverCellChanged,
             onCommitWidgetDrag = viewModel::commitWidgetDrag,
@@ -149,6 +153,10 @@ fun WidgetDeckOverlayScreen(
     onWidgetHoverCellChanged: (appWidgetId: Int, cellX: Int, cellY: Int) -> Unit = { _, _, _ -> },
     onCommitWidgetDrag: (appWidgetId: Int, cellX: Int, cellY: Int) -> Unit = { id, x, y -> onMoveWidget(id, x, y) },
     onCancelWidgetDrag: () -> Unit = {},
+    onStartWidgetResize: (appWidgetId: Int) -> Unit = {},
+    onWidgetResizeBoundsChanged: (appWidgetId: Int, cellX: Int, cellY: Int, spanX: Int, spanY: Int) -> Unit = { _, _, _, _, _ -> },
+    onCommitWidgetResize: (appWidgetId: Int, cellX: Int, cellY: Int, spanX: Int, spanY: Int) -> Unit = { id, x, y, sx, sy -> onResizeWidget(id, x, y, sx, sy) },
+    onCancelWidgetResize: () -> Unit = onCancelWidgetDrag,
     onEdgeDwellTriggered: (EdgeDirection) -> Unit = {},
     onRemoveWidget: (appWidgetId: Int) -> Unit = {},
     onReconfigureWidget: ((appWidgetId: Int) -> Unit)? = null,
@@ -321,7 +329,7 @@ fun WidgetDeckOverlayScreen(
 
             // LAYER 3.5: Edit-Mode Drag & Resize Layer (Stationary overlay above AnimatedContent)
             val editingWidget = uiState.effectiveWidgets.find { it.appWidgetId == uiState.editingWidgetId }
-            if (editingWidget != null && (editingWidget.pageIndex == uiState.activePageIndex || uiState.draggingWidgetId == editingWidget.appWidgetId)) {
+            if (editingWidget != null && (editingWidget.pageIndex == uiState.activePageIndex || uiState.draggingWidgetId == editingWidget.appWidgetId || uiState.resizingWidgetId == editingWidget.appWidgetId)) {
                 key(editingWidget.appWidgetId) {
                     WidgetEditDragLayer(
                         widget = editingWidget,
@@ -361,6 +369,22 @@ fun WidgetDeckOverlayScreen(
                                 lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
                                 callback(id)
                             }
+                        },
+                        onStartWidgetResize = { id ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onStartWidgetResize(id)
+                        },
+                        onWidgetResizeBoundsChanged = { id, x, y, sx, sy ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onWidgetResizeBoundsChanged(id, x, y, sx, sy)
+                        },
+                        onCommitWidgetResize = { id, x, y, sx, sy ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onCommitWidgetResize(id, x, y, sx, sy)
+                        },
+                        onCancelWidgetResize = {
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onCancelWidgetResize()
                         },
                         widgetContent = widgetContent
                     )

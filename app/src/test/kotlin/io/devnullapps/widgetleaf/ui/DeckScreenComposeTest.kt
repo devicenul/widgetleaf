@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.swipeUp
@@ -38,6 +39,8 @@ import io.devnullapps.widgetleaf.ui.components.WidgetDeckOverlayScreen
 import io.devnullapps.widgetleaf.ui.hostview.DeckAppWidgetHostView
 import io.devnullapps.widgetleaf.ui.hostview.DeckWidgetHostContainer
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckUiState
+import io.devnullapps.widgetleaf.ui.viewmodel.DeckViewModel
+import kotlinx.coroutines.launch
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -913,6 +916,394 @@ class DeckScreenComposeTest {
         composeTestRule.onNodeWithTag("resize_handle_bottom_403").assertIsDisplayed()
         composeTestRule.onNodeWithTag("resize_handle_left_403").assertDoesNotExist()
         composeTestRule.onNodeWithTag("resize_handle_right_403").assertDoesNotExist()
+    }
+
+    @Test
+    fun cornerHandlesOnlyForResizeBoth() {
+        val noneWidget = PlacedWidget(
+            appWidgetId = 401,
+            providerPackage = "pkg",
+            providerClass = "Class1",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            resizeMode = PlacedWidget.RESIZE_NONE
+        )
+        val horizWidget = PlacedWidget(
+            appWidgetId = 402,
+            providerPackage = "pkg",
+            providerClass = "Class2",
+            pageIndex = 0,
+            cellX = 2,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            resizeMode = PlacedWidget.RESIZE_HORIZONTAL
+        )
+        val vertWidget = PlacedWidget(
+            appWidgetId = 403,
+            providerPackage = "pkg",
+            providerClass = "Class3",
+            pageIndex = 0,
+            cellX = 4,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            resizeMode = PlacedWidget.RESIZE_VERTICAL
+        )
+        val bothWidget = PlacedWidget(
+            appWidgetId = 404,
+            providerPackage = "pkg",
+            providerClass = "Class4",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 2,
+            spanX = 2,
+            spanY = 2,
+            resizeMode = PlacedWidget.RESIZE_BOTH
+        )
+
+        var editingId by mutableStateOf<Int?>(401)
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = DeckUiState(
+                    widgets = listOf(noneWidget, horizWidget, vertWidget, bothWidget),
+                    editingWidgetId = editingId
+                ),
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> }
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        // RESIZE_NONE: no corner handles
+        composeTestRule.onNodeWithTag("resize_handle_top_left_401").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_top_right_401").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_bottom_left_401").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_bottom_right_401").assertDoesNotExist()
+
+        // RESIZE_HORIZONTAL: no corner handles
+        editingId = 402
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("resize_handle_top_left_402").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_top_right_402").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_bottom_left_402").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_bottom_right_402").assertDoesNotExist()
+
+        // RESIZE_VERTICAL: no corner handles
+        editingId = 403
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("resize_handle_top_left_403").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_top_right_403").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_bottom_left_403").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_bottom_right_403").assertDoesNotExist()
+
+        // RESIZE_BOTH: ALL 4 corner handles are displayed!
+        editingId = 404
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("resize_handle_top_left_404").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("resize_handle_top_right_404").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("resize_handle_bottom_left_404").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("resize_handle_bottom_right_404").assertIsDisplayed()
+    }
+
+    @Test
+    fun bottomRightCornerGrowsBothSpans() {
+        val widget = PlacedWidget(
+            appWidgetId = 501,
+            providerPackage = "io.devnullapps.calendar",
+            providerClass = "CalendarWidget",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            minSpanX = 1,
+            minSpanY = 1,
+            maxSpanX = 6,
+            maxSpanY = 6,
+            resizeMode = PlacedWidget.RESIZE_BOTH
+        )
+
+        var committedSpanX = -1
+        var committedSpanY = -1
+
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = DeckUiState(
+                    widgets = listOf(widget),
+                    editingWidgetId = 501
+                ),
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                onResizeWidget = { _, _, _, newSpanX, newSpanY ->
+                    committedSpanX = newSpanX
+                    committedSpanY = newSpanY
+                }
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("resize_handle_bottom_right_501").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("resize_handle_bottom_right_501").performTouchInput {
+            swipe(
+                start = center,
+                end = center + Offset(200f, 200f),
+                durationMillis = 200
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        assertThat(committedSpanX).isGreaterThan(2)
+        assertThat(committedSpanY).isGreaterThan(2)
+    }
+
+    @Test
+    fun topLeftCornerMovesOrigin() {
+        val widget = PlacedWidget(
+            appWidgetId = 502,
+            providerPackage = "io.devnullapps.calendar",
+            providerClass = "CalendarWidget",
+            pageIndex = 0,
+            cellX = 3,
+            cellY = 3,
+            spanX = 2,
+            spanY = 2,
+            minSpanX = 1,
+            minSpanY = 1,
+            maxSpanX = 6,
+            maxSpanY = 6,
+            resizeMode = PlacedWidget.RESIZE_BOTH
+        )
+
+        var committedCellX = -1
+        var committedCellY = -1
+        var committedSpanX = -1
+        var committedSpanY = -1
+
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = DeckUiState(
+                    widgets = listOf(widget),
+                    editingWidgetId = 502
+                ),
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                onResizeWidget = { _, newCellX, newCellY, newSpanX, newSpanY ->
+                    committedCellX = newCellX
+                    committedCellY = newCellY
+                    committedSpanX = newSpanX
+                    committedSpanY = newSpanY
+                }
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("resize_handle_top_left_502").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("resize_handle_top_left_502").performTouchInput {
+            swipe(
+                start = center,
+                end = center + Offset(-200f, -200f),
+                durationMillis = 200
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        assertThat(committedCellX).isLessThan(3)
+        assertThat(committedCellY).isLessThan(3)
+        assertThat(committedSpanX).isGreaterThan(2)
+        assertThat(committedSpanY).isGreaterThan(2)
+    }
+
+    @Test
+    fun resizingOverNeighborShowsDisplacedWidgetAfterDebounceAndPersistsOnRelease() {
+        val w1 = PlacedWidget(
+            appWidgetId = 601,
+            providerPackage = "pkg",
+            providerClass = "Class1",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            minSpanX = 1,
+            minSpanY = 1,
+            maxSpanX = 6,
+            maxSpanY = 6,
+            resizeMode = PlacedWidget.RESIZE_BOTH
+        )
+        val w2 = PlacedWidget(
+            appWidgetId = 602,
+            providerPackage = "pkg",
+            providerClass = "Class2",
+            pageIndex = 0,
+            cellX = 2,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            minSpanX = 1,
+            minSpanY = 1,
+            maxSpanX = 6,
+            maxSpanY = 6,
+            resizeMode = PlacedWidget.RESIZE_BOTH
+        )
+
+        var state by mutableStateOf(
+            DeckUiState(
+                widgets = listOf(w1, w2),
+                editingWidgetId = 601
+            )
+        )
+        var debounceJob: kotlinx.coroutines.Job? = null
+
+        composeTestRule.setContent {
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            WidgetDeckOverlayScreen(
+                uiState = state,
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                onStartWidgetResize = { id ->
+                    state = state.copy(resizingWidgetId = id)
+                },
+                onWidgetResizeBoundsChanged = { id, x, y, sx, sy ->
+                    debounceJob?.cancel()
+                    val target = w1.copy(cellX = x, cellY = y, spanX = sx, spanY = sy)
+                    val overlaps = state.widgets.any { it.appWidgetId != id && it.bounds.intersects(target.bounds) }
+                    if (overlaps) {
+                        debounceJob = scope.launch {
+                            kotlinx.coroutines.delay(250L)
+                            val result = io.devnullapps.widgetleaf.domain.usecase.CascadeDisplacementResolver.resolve(
+                                dragged = target,
+                                allWidgets = state.widgets,
+                                columns = state.gridProfile.columns,
+                                rows = state.gridProfile.rows,
+                                pageCount = state.pages.size
+                            )
+                            if (result != null) {
+                                state = state.copy(
+                                    previewWidgets = result.widgets,
+                                    displacedWidgetIds = result.movedWidgetIds
+                                )
+                            }
+                        }
+                    } else {
+                        state = state.copy(previewWidgets = null, displacedWidgetIds = emptySet())
+                    }
+                },
+                onCommitWidgetResize = { id, x, y, sx, sy ->
+                    debounceJob?.cancel()
+                    val target = w1.copy(cellX = x, cellY = y, spanX = sx, spanY = sy)
+                    val result = io.devnullapps.widgetleaf.domain.usecase.CascadeDisplacementResolver.resolve(
+                        dragged = target,
+                        allWidgets = state.widgets,
+                        columns = state.gridProfile.columns,
+                        rows = state.gridProfile.rows,
+                        pageCount = state.pages.size
+                    )
+                    if (result != null) {
+                        state = state.copy(
+                            widgets = result.widgets,
+                            previewWidgets = null,
+                            displacedWidgetIds = emptySet(),
+                            resizingWidgetId = null
+                        )
+                    }
+                },
+                onCancelWidgetResize = {
+                    debounceJob?.cancel()
+                    state = state.copy(previewWidgets = null, displacedWidgetIds = emptySet(), resizingWidgetId = null)
+                }
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        // Initially: W2 is at (cellX=2, cellY=0)
+        composeTestRule.onNodeWithTag("placed_widget_602").assertIsDisplayed()
+
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            // Drag right resize handle on W1 by ~300px to cover cellX = 2 (overlapping W2)
+            composeTestRule.onNodeWithTag("resize_handle_right_601").performTouchInput {
+                down(center)
+                moveBy(Offset(300f, 0f))
+            }
+
+            // At 100ms: debounce has not triggered yet, previewWidgets is null
+            composeTestRule.mainClock.advanceTimeBy(100)
+            assertThat(state.previewWidgets).isNull()
+
+            // Advance clock past 250ms debounce (advance by 200ms -> total 300ms)
+            composeTestRule.mainClock.advanceTimeBy(200)
+
+            // Live cascade preview is now published!
+            val preview = state.previewWidgets
+            assertThat(preview).isNotNull()
+            assertThat(state.displacedWidgetIds).contains(602)
+            val displacedW2 = preview!!.find { it.appWidgetId == 602 }
+            assertThat(displacedW2?.cellY).isGreaterThan(0) // Cascaded downward!
+
+            // Now release the pointer (commit resize)
+            composeTestRule.onNodeWithTag("resize_handle_right_601").performTouchInput {
+                up()
+            }
+            composeTestRule.mainClock.advanceTimeBy(50)
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
+        }
+
+        composeTestRule.waitForIdle()
+
+        // Committed & persisted: W1 has expanded spanX >= 3, and W2 is displaced at cellY >= 2
+        val committedW1 = state.widgets.find { it.appWidgetId == 601 }
+        val committedW2 = state.widgets.find { it.appWidgetId == 602 }
+        assertThat(committedW1?.spanX).isGreaterThan(2)
+        assertThat(committedW2?.cellY).isGreaterThan(0)
     }
 
     @Test
