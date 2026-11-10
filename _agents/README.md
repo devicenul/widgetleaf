@@ -100,6 +100,15 @@ cp app/build/outputs/apk/debug/WidgetLeaf-debug.apk /storage/emulated/10/AntiGra
 cp app/build/outputs/apk/release/WidgetLeaf-release.apk /storage/emulated/10/AntiGravity/WidgetLeaf-release.apk
 ```
 
+### 4.1 Release Signing Credentials Setup
+
+Release signing credentials (`storeFile`, `storePassword`, `keyAlias`, `keyPassword`) are resolved dynamically without hardcoded secrets:
+1. **Environment Variables (CI / Automation):** `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` (and optional `KEYSTORE_FILE`).
+2. **Local Keystore Properties (`keystore.properties` in repo root):**
+   - Keys: `storeFile` (relative to `app/`, e.g. `keystore/release.jks`), `storePassword`, `keyAlias`, `keyPassword`.
+   - File is strictly gitignored (`.gitignore`).
+3. **Safety Fallback:** Debug builds and unit tests execute cleanly without release credentials present. Release packaging tasks (`assembleRelease`, `bundleRelease`) fail fast with a descriptive error if credentials are missing.
+
 ---
 
 ## 5. Definition of Done for Agents

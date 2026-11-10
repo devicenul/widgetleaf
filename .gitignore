@@ -39,3 +39,6 @@ play-store-keys.json
 # OS-specific files
 .DS_Store
 Thumbs.db
+
+# Release signing credentials (never commit)
+keystore.properties

@@ -1,4 +1,5 @@
 import org.gradle.testing.jacoco.plugins.JacocoTaskExtension
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -11,6 +12,35 @@ plugins {
 base {
     archivesName.set("WidgetLeaf")
 }
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+val envStorePassword = System.getenv("KEYSTORE_PASSWORD")
+val envKeyAlias = System.getenv("KEY_ALIAS")
+val envKeyPassword = System.getenv("KEY_PASSWORD")
+val envStoreFile = System.getenv("KEYSTORE_FILE")
+
+val releaseStorePassword: String? = envStorePassword?.takeIf { it.isNotBlank() }
+    ?: keystoreProperties.getProperty("storePassword")?.takeIf { it.isNotBlank() }
+
+val releaseKeyAlias: String? = envKeyAlias?.takeIf { it.isNotBlank() }
+    ?: keystoreProperties.getProperty("keyAlias")?.takeIf { it.isNotBlank() }
+
+val releaseKeyPassword: String? = envKeyPassword?.takeIf { it.isNotBlank() }
+    ?: keystoreProperties.getProperty("keyPassword")?.takeIf { it.isNotBlank() }
+
+val releaseStoreFilePath: String = envStoreFile?.takeIf { it.isNotBlank() }
+    ?: keystoreProperties.getProperty("storeFile")?.takeIf { it.isNotBlank() }
+    ?: "keystore/release.jks"
+
+val hasReleaseSigning = !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
 
 android {
     namespace = "io.devnullapps.widgetleaf"
@@ -31,14 +61,17 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file("keystore/release.jks")
-            storePassword = "widgetleafRelease"
-            keyAlias = "widgetleafKey"
-            keyPassword = "widgetleafRelease"
-            enableV1Signing = true
-            enableV2Signing = true
-            enableV3Signing = true
+        if (hasReleaseSigning) {
+            create("release") {
+                val storePathFile = file(releaseStoreFilePath)
+                storeFile = if (storePathFile.isAbsolute) storePathFile else file(releaseStoreFilePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
         }
     }
 
@@ -53,7 +86,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -183,3 +218,16 @@ dependencies {
     testImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("androidx.room:room-testing:2.6.1")
 }
+
+gradle.taskGraph.whenReady {
+    val releaseTasks = allTasks.filter { task ->
+        task.name.contains("Release", ignoreCase = true) &&
+            (task.name.startsWith("assemble") || task.name.startsWith("bundle") || task.name.startsWith("package"))
+    }
+    if (releaseTasks.isNotEmpty() && !hasReleaseSigning) {
+        throw GradleException(
+            "Release signing credentials not found. Provide KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD environment variables or keystore.properties in the repository root."
+        )
+    }
+}
+

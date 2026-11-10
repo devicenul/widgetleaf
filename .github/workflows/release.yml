@@ -3,7 +3,7 @@ name: WidgetLeaf Release & Play Store CD
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -28,25 +28,26 @@ jobs:
       - name: Decode Upload Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          mkdir -p app/keystore
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 --decode > app/keystore/release.jks
-          else
-            keytool -genkeypair -v \
-              -keystore app/keystore/release.jks \
-              -keyalg RSA -keysize 4096 -validity 10000 \
-              -alias "${{ secrets.ANDROID_KEY_ALIAS || 'widgetleafKey' }}" \
-              -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'widgetleafRelease' }}" \
-              -keypass "${{ secrets.ANDROID_KEY_PASSWORD || 'widgetleafRelease' }}" \
-              -dname "CN=WidgetLeaf, OU=DevNullApps, O=DevNullApps, L=Mountain View, ST=CA, C=US"
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Missing required secret ANDROID_UPLOAD_KEYSTORE_BASE64"
+            exit 1
           fi
+          if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Missing required release signing secrets (ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, or ANDROID_KEY_PASSWORD)"
+            exit 1
+          fi
+          mkdir -p app/keystore
+          echo "$KEYSTORE_BASE64" | base64 --decode > app/keystore/release.jks
 
       - name: Build Signed Release APK & App Bundle (R8 + v2/v3 Signing)
         env:
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD || 'widgetleafRelease' }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS || 'widgetleafKey' }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || 'widgetleafRelease' }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease bundleRelease --stacktrace
@@ -67,3 +68,4 @@ jobs:
             app/build/outputs/apk/release/*.apk
             app/build/outputs/bundle/release/*.aab
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-rc') }}
