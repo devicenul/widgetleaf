@@ -394,7 +394,7 @@ class DeckScreenComposeTest {
         }
 
         composeTestRule.onNodeWithTag("overlay_settings_dialog").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("overlay_settings_version_badge").assertTextEquals("v0.0.2")
+        composeTestRule.onNodeWithTag("overlay_settings_version_badge").assertTextEquals("v0.0.3")
         composeTestRule.onNodeWithTag("current_hotkey_badge").assertTextEquals("Alt + W")
 
         // Toggle 1: openOnPageOne
