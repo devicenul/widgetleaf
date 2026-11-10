@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -321,47 +322,49 @@ fun WidgetDeckOverlayScreen(
             // LAYER 3.5: Edit-Mode Drag & Resize Layer (Stationary overlay above AnimatedContent)
             val editingWidget = uiState.effectiveWidgets.find { it.appWidgetId == uiState.editingWidgetId }
             if (editingWidget != null && (editingWidget.pageIndex == uiState.activePageIndex || uiState.draggingWidgetId == editingWidget.appWidgetId)) {
-                WidgetEditDragLayer(
-                    widget = editingWidget,
-                    gridProfile = uiState.gridProfile,
-                    isDragging = uiState.draggingWidgetId == editingWidget.appWidgetId,
-                    activePageIndex = uiState.activePageIndex,
-                    onStartWidgetDrag = { id ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onStartWidgetDrag(id)
-                    },
-                    onWidgetHoverCellChanged = { id, x, y ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onWidgetHoverCellChanged(id, x, y)
-                    },
-                    onCommitWidgetDrag = { id, x, y ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onCommitWidgetDrag(id, x, y)
-                    },
-                    onCancelWidgetDrag = {
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onCancelWidgetDrag()
-                    },
-                    onEdgeDwellTriggered = { dir ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onEdgeDwellTriggered(dir)
-                    },
-                    onResizeWidget = { id, x, y, sx, sy ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onResizeWidget(id, x, y, sx, sy)
-                    },
-                    onRemoveWidget = { id ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onRemoveWidget(id)
-                    },
-                    onReconfigureWidget = onReconfigureWidget?.let { callback ->
-                        { id ->
+                key(editingWidget.appWidgetId) {
+                    WidgetEditDragLayer(
+                        widget = editingWidget,
+                        gridProfile = uiState.gridProfile,
+                        isDragging = uiState.draggingWidgetId == editingWidget.appWidgetId,
+                        activePageIndex = uiState.activePageIndex,
+                        onStartWidgetDrag = { id ->
                             lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                            callback(id)
-                        }
-                    },
-                    widgetContent = widgetContent
-                )
+                            onStartWidgetDrag(id)
+                        },
+                        onWidgetHoverCellChanged = { id, x, y ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onWidgetHoverCellChanged(id, x, y)
+                        },
+                        onCommitWidgetDrag = { id, x, y ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onCommitWidgetDrag(id, x, y)
+                        },
+                        onCancelWidgetDrag = {
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onCancelWidgetDrag()
+                        },
+                        onEdgeDwellTriggered = { dir ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onEdgeDwellTriggered(dir)
+                        },
+                        onResizeWidget = { id, x, y, sx, sy ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onResizeWidget(id, x, y, sx, sy)
+                        },
+                        onRemoveWidget = { id ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onRemoveWidget(id)
+                        },
+                        onReconfigureWidget = onReconfigureWidget?.let { callback ->
+                            { id ->
+                                lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                                callback(id)
+                            }
+                        },
+                        widgetContent = widgetContent
+                    )
+                }
             }
 
             // LAYER 2 (Cont.): Bottom Pagination HUD Pill (hidden while modal sheets/dialogs are open)

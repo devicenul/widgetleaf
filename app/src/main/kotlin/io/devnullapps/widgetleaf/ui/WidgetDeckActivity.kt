@@ -44,6 +44,7 @@ import io.devnullapps.widgetleaf.services.WidgetDeckTileService
 import io.devnullapps.widgetleaf.ui.components.DefaultFramelessWidgetContent
 import io.devnullapps.widgetleaf.ui.components.WidgetDeckOverlayScreen
 import io.devnullapps.widgetleaf.ui.hostview.DeckAppWidgetHostView
+import io.devnullapps.widgetleaf.ui.hostview.DeckWidgetHostContainer
 import io.devnullapps.widgetleaf.ui.theme.MotionSpec
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckViewModel
 import io.devnullapps.widgetleaf.ui.viewmodel.PendingWidgetAction
@@ -348,52 +349,28 @@ class WidgetDeckActivity : ComponentActivity() {
         }
 
         val isEditing = uiState.editingWidgetId == placedWidget.appWidgetId
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
+        DeckWidgetHostContainer(
+            placedWidget = placedWidget,
+            isEditing = isEditing,
+            createHostView = { ctx ->
                 container.widgetDeckHost.createHostView(
                     context = ctx,
                     appWidgetId = placedWidget.appWidgetId,
                     appWidget = providerInfo
-                ).apply {
-                    (parent as? ViewGroup)?.removeView(this)
-                    setPadding(0, 0, 0, 0)
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    this.interactionMode = if (isEditing) {
-                        DeckAppWidgetHostView.HostInteractionMode.EDIT_MODE
-                    } else {
-                        DeckAppWidgetHostView.HostInteractionMode.INTERACTIVE
-                    }
-                    onEnterEditModeListener = { id, _, _ ->
-                        viewModel.enterWidgetEditMode(id)
-                    }
-                    onHorizontalPageScrollListener = { delta ->
-                        if (delta > 0f) {
-                            viewModel.navigatePreviousPage()
-                        } else if (delta < 0f) {
-                            viewModel.navigateNextPage()
-                        }
-                    }
-                    onErrorRemoveOrReloadListener = { id ->
-                        viewModel.removeWidget(id)
-                    }
+                )
+            },
+            onEnterEditMode = { id ->
+                viewModel.enterWidgetEditMode(id)
+            },
+            onHorizontalPageScroll = { delta ->
+                if (delta > 0f) {
+                    viewModel.navigatePreviousPage()
+                } else if (delta < 0f) {
+                    viewModel.navigateNextPage()
                 }
             },
-            onReset = { hostView ->
-                (hostView.parent as? ViewGroup)?.removeView(hostView)
-            },
-            onRelease = { hostView ->
-                (hostView.parent as? ViewGroup)?.removeView(hostView)
-            },
-            update = { hostView ->
-                hostView.interactionMode = if (isEditing) {
-                    DeckAppWidgetHostView.HostInteractionMode.EDIT_MODE
-                } else {
-                    DeckAppWidgetHostView.HostInteractionMode.INTERACTIVE
-                }
+            onErrorRemoveOrReload = { id ->
+                viewModel.removeWidget(id)
             }
         )
     }

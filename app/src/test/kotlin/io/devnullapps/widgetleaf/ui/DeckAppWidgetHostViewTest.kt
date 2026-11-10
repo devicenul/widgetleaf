@@ -14,6 +14,9 @@ import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import io.devnullapps.widgetleaf.ui.hostview.DeckAppWidgetHostView
 import io.devnullapps.widgetleaf.ui.hostview.DeckAppWidgetHostView.HostInteractionMode
+import io.devnullapps.widgetleaf.ui.hostview.detachHostViewIfOwned
+import android.widget.FrameLayout
+import android.view.ViewGroup
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -461,5 +464,47 @@ class DeckAppWidgetHostViewTest {
             android.view.InputDevice.SOURCE_MOUSE,
             0
         )
+    }
+
+    @Test
+    fun detachHostViewIfOwned_onlyRemovesFromOwnContainer() {
+        val containerA = FrameLayout(context)
+        val containerB = FrameLayout(context)
+
+        // 1. Initially attached to container A
+        containerA.addView(hostView)
+        assertThat(hostView.parent).isSameInstanceAs(containerA)
+
+        // 2. Reparent to container B (as happens when transitioning to drag layer or grid)
+        (hostView.parent as? ViewGroup)?.removeView(hostView)
+        containerB.addView(hostView)
+        assertThat(hostView.parent).isSameInstanceAs(containerB)
+
+        // 3. Outgoing container A's onRelease runs:
+        // Must NOT remove hostView from container B!
+        detachHostViewIfOwned(containerA, hostView)
+        assertThat(hostView.parent).isSameInstanceAs(containerB)
+
+        // 4. Detaching from its actual container B succeeds
+        detachHostViewIfOwned(containerB, hostView)
+        assertThat(hostView.parent).isNull()
+    }
+
+    @Test
+    fun detachHostViewIfOwned_withoutExplicitChild_onlyRemovesOwnChildren() {
+        val containerA = FrameLayout(context)
+        val containerB = FrameLayout(context)
+
+        containerA.addView(hostView)
+        (hostView.parent as? ViewGroup)?.removeView(hostView)
+        containerB.addView(hostView)
+
+        // Container A is now empty; calling without explicit child does not affect container B
+        detachHostViewIfOwned(containerA)
+        assertThat(hostView.parent).isSameInstanceAs(containerB)
+
+        // Container B has hostView as child; calling without explicit child removes it
+        detachHostViewIfOwned(containerB)
+        assertThat(hostView.parent).isNull()
     }
 }

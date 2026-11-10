@@ -113,11 +113,12 @@
 - **Rule:** The edit-mode move surface, resize frame, and dragged visual are hoisted into an un-animated sibling overlay (`WidgetEditDragLayer`) rendered in `WidgetDeckOverlayScreen` strictly above `AnimatedContent` (Layer 3.5). `WidgetGridPage` skips rendering any widget whose `appWidgetId == editingWidgetId`. Drag gestures remain rock-solid across page transitions, satisfying INV-2 and INV-12.
 
 ### INV-16: Single-Parent Enforcement & View Cache Safety for `DeckAppWidgetHostView`
-- **Why:** An Android `View` can have at most one parent `ViewGroup`. When transitioning into/out of edit mode, the widget's `DeckAppWidgetHostView` moves between `WidgetGridPage` and `WidgetEditDragLayer`. If the host view is reused or cached, Compose factory composition timing can attempt to attach the view to a new parent before the old parent's disposal pass completes, throwing `IllegalStateException: The specified child already has a parent`.
+- **Why:** An Android `View` can have at most one parent `ViewGroup`. When transitioning into/out of edit mode, the widget's `DeckAppWidgetHostView` moves between `WidgetGridPage` and `WidgetEditDragLayer`. If the host view is reused or cached, Compose factory composition timing can attach the view to the incoming container before the outgoing container's disposal pass completes. If the outgoing `onRelease` blindly calls `(hostView.parent as? ViewGroup)?.removeView(hostView)`, it strips the view from the *new* container, causing the widget to show as a blank outline during edit mode/drag and disappear entirely after drop/exit edit mode.
 - **Rule:**
   1. `WidgetDeckHost.createHostView` MUST cache `DeckAppWidgetHostView` by `appWidgetId` and explicitly detach the view from any existing parent (`(view.parent as? ViewGroup)?.removeView(view)`) before returning it.
-  2. `HostedAppWidgetContent` in `AndroidView` MUST ensure `(hostView.parent as? ViewGroup)?.removeView(hostView)` in `factory`, `onReset`, and `onRelease`.
-  3. `WidgetDeckHost` clears cached views on `deleteAppWidgetId` and `clearViews`.
+  2. `DeckWidgetHostContainer` wraps `DeckAppWidgetHostView` in a lightweight `FrameLayout` container. In `onReset` and `onRelease`, it MUST only detach the host view if it is strictly owned by *this* container (`detachHostViewIfOwned(container, hostView)` where `hostView.parent === container`). It must NEVER blindly detach a host view that has already been adopted by another container.
+  3. `WidgetGridPage` MUST skip composing any widget whose `appWidgetId == editingWidgetId || appWidgetId == draggingWidgetId`, ensuring exactly one `AndroidView` per `appWidgetId` is active at any time.
+  4. `WidgetDeckHost` clears cached views on `deleteAppWidgetId` and `clearViews`.
 
 ### INV-17: In-Drag Edge Dwell Page Switching Semantics
 - **Why:** Abruptly bumping a widget across pages on drop without visual feedback is jarring and prevents precise placement. Mid-drag edge dwell allows users to preview the destination page and its cascade displacement before committing.

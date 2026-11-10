@@ -335,7 +335,7 @@ fun WidgetGridPage(
             }
 
             widgets.forEach { widget ->
-                if (widget.appWidgetId == editingWidgetId) {
+                if (widget.appWidgetId == editingWidgetId || widget.appWidgetId == draggingWidgetId) {
                     return@forEach
                 }
                 key(widget.appWidgetId) {

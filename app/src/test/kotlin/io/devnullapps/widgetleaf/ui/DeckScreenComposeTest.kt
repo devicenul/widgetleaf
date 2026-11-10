@@ -24,6 +24,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.swipeUp
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import io.devnullapps.widgetleaf.domain.model.DeckPage
@@ -35,6 +36,7 @@ import io.devnullapps.widgetleaf.domain.model.WidgetCatalogItem
 import io.devnullapps.widgetleaf.domain.usecase.CalculateResponsiveSizesUseCase
 import io.devnullapps.widgetleaf.ui.components.WidgetDeckOverlayScreen
 import io.devnullapps.widgetleaf.ui.hostview.DeckAppWidgetHostView
+import io.devnullapps.widgetleaf.ui.hostview.DeckWidgetHostContainer
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckUiState
 import org.junit.Rule
 import org.junit.Test
@@ -1340,5 +1342,132 @@ class DeckScreenComposeTest {
         composeTestRule.onNodeWithTag("page_pill_1").assertIsDisplayed()
         // Drop-target ghost outline is rendered at hoveredCell on active page 1
         composeTestRule.onNodeWithTag("drag_ghost_outline").assertIsDisplayed()
+    }
+
+    @Test
+    fun cachedHostView_remainsAttachedAndVisibleThroughEditModeDragDropAndExit() {
+        val widget = PlacedWidget(
+            appWidgetId = 101,
+            providerPackage = "com.test.widget",
+            providerClass = "TestWidgetProvider",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2
+        )
+        val profile = DesktopGridProfile()
+        var currentWidgets by mutableStateOf(listOf(widget))
+        var currentEditingId by mutableStateOf<Int?>(null)
+        var currentDraggingId by mutableStateOf<Int?>(null)
+        var currentHoveredCell by mutableStateOf<Pair<Int, Int>?>(null)
+
+        val cachedHostView = DeckAppWidgetHostView(ApplicationProvider.getApplicationContext()).apply {
+            setAppWidget(101, null)
+        }
+
+        composeTestRule.setContent {
+            val state = DeckUiState(
+                pages = listOf(DeckPage(pageIndex = 0)),
+                widgets = currentWidgets,
+                gridProfile = profile,
+                editingWidgetId = currentEditingId,
+                draggingWidgetId = currentDraggingId,
+                hoveredCell = currentHoveredCell
+            )
+
+            WidgetDeckOverlayScreen(
+                uiState = state,
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                onEnterEditMode = { id -> currentEditingId = id },
+                onExitEditMode = { currentEditingId = null },
+                onStartWidgetDrag = { id -> currentDraggingId = id },
+                onWidgetHoverCellChanged = { _, x, y -> currentHoveredCell = Pair(x, y) },
+                onCommitWidgetDrag = { id, x, y ->
+                    currentWidgets = currentWidgets.map {
+                        if (it.appWidgetId == id) it.copy(cellX = x, cellY = y) else it
+                    }
+                    currentDraggingId = null
+                    currentHoveredCell = null
+                },
+                onCancelWidgetDrag = {
+                    currentDraggingId = null
+                    currentHoveredCell = null
+                },
+                widgetContent = { placed ->
+                    DeckWidgetHostContainer(
+                        placedWidget = placed,
+                        isEditing = currentEditingId == placed.appWidgetId,
+                        createHostView = { cachedHostView }
+                    )
+                }
+            )
+        }
+
+        composeTestRule.waitForIdle()
+
+        // 1. Initial state (WidgetGridPage): cachedView must be attached to window and have parent
+        assertThat(cachedHostView.parent).isNotNull()
+        assertThat(cachedHostView.isAttachedToWindow).isTrue()
+        assertThat(cachedHostView.interactionMode).isEqualTo(DeckAppWidgetHostView.HostInteractionMode.INTERACTIVE)
+        composeTestRule.onNodeWithTag("placed_widget_101").assertIsDisplayed()
+
+        // 2. Enter edit mode (transition to WidgetEditDragLayer)
+        // BUG (a): previously, outgoing AndroidView's onRelease removed cachedHostView from the new drag layer parent,
+        // leaving the drag layer empty/blank.
+        composeTestRule.runOnIdle {
+            currentEditingId = 101
+        }
+        composeTestRule.waitForIdle()
+
+        assertThat(cachedHostView.parent).isNotNull()
+        assertThat(cachedHostView.isAttachedToWindow).isTrue()
+        assertThat(cachedHostView.interactionMode).isEqualTo(DeckAppWidgetHostView.HostInteractionMode.EDIT_MODE)
+        composeTestRule.onNodeWithTag("placed_widget_101").assertIsDisplayed()
+
+        // 3. Move/drag widget
+        composeTestRule.onNodeWithTag("placed_widget_101").performTouchInput {
+            down(center)
+            moveBy(Offset(100f, 100f))
+        }
+        composeTestRule.waitForIdle()
+
+        assertThat(cachedHostView.parent).isNotNull()
+        assertThat(cachedHostView.isAttachedToWindow).isTrue()
+
+        // 4. Drop widget (commit)
+        composeTestRule.onNodeWithTag("placed_widget_101").performTouchInput {
+            up()
+        }
+        composeTestRule.waitForIdle()
+
+        // After dropping, cachedHostView must remain attached and visible
+        assertThat(cachedHostView.parent).isNotNull()
+        assertThat(cachedHostView.isAttachedToWindow).isTrue()
+
+        // 5. Exit edit mode (transition back to WidgetGridPage)
+        // BUG (b): previously, drag layer's onRelease stripped cachedHostView from WidgetGridPage's container,
+        // making the widget disappear until page switch or activity reload.
+        composeTestRule.runOnIdle {
+            currentEditingId = null
+        }
+        composeTestRule.waitForIdle()
+
+        assertThat(cachedHostView.parent).isNotNull()
+        assertThat(cachedHostView.isAttachedToWindow).isTrue()
+        assertThat(cachedHostView.interactionMode).isEqualTo(DeckAppWidgetHostView.HostInteractionMode.INTERACTIVE)
+        composeTestRule.onNodeWithTag("placed_widget_101").assertIsDisplayed()
     }
 }

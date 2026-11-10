@@ -68,7 +68,7 @@
 │       │   └── ui/
 │       │       ├── WidgetDeckActivity.kt        # Translucent overlay Activity & AppWidget bind flow
 │       │       ├── viewmodel/                   # DeckViewModel & DeckUiState
-│       │       ├── hostview/                    # WidgetDeckHost & DeckAppWidgetHostView
+│       │       ├── hostview/                    # WidgetDeckHost, DeckAppWidgetHostView & DeckWidgetHostContainer
 │       │       ├── theme/                       # Color, Theme, MotionSpec
 │       │       └── components/                  # WidgetDeckOverlayScreen, WidgetGridPage,
 │       │                                        # WidgetEditDragLayer, GlassSurfaceBox (WidgetEditResizeFrame),
