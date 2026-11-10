@@ -72,12 +72,12 @@ fun OverlaySettingsDialog(
     val scrollState = rememberScrollState()
     var isRecordingHotkey by remember { mutableStateOf(false) }
     val hotkeyFocusRequester = remember { FocusRequester() }
-    var isTopBarServiceActive by remember(settings.pinToTopBar, isOpen, windowInfo.isWindowFocused) {
+    var isTopBarServiceActive by remember(isOpen, windowInfo.isWindowFocused) {
         mutableStateOf(WidgetLeafTopBarService.isServiceEnabled(context))
     }
 
-    LaunchedEffect(isOpen, settings.pinToTopBar) {
-        while (isOpen && settings.pinToTopBar && !isTopBarServiceActive) {
+    LaunchedEffect(isOpen) {
+        while (isOpen && !isTopBarServiceActive) {
             delay(1000L)
             isTopBarServiceActive = WidgetLeafTopBarService.isServiceEnabled(context)
         }
@@ -402,27 +402,11 @@ fun OverlaySettingsDialog(
                     // Section: Top Bar Integration
                     SettingsSectionHeader("Top Bar Integration")
 
-                    SettingToggleRow(
-                        title = "Pin to Top Bar",
-                        subtitle = "Show clickable WidgetLeaf icon in the desktop top status bar",
-                        checked = settings.pinToTopBar,
-                        onCheckedChange = { checked ->
-                            onUpdateSettings {
-                                it.copy(
-                                    pinToTopBar = checked,
-                                    pinTopBarLeftStatusIcon = checked
-                                )
-                            }
-                        },
-                        testTag = "setting_top_bar_left"
-                    )
-
-                    if (settings.pinToTopBar) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
@@ -564,7 +548,6 @@ fun OverlaySettingsDialog(
                                 }
                             }
                         }
-                    }
 
                     SettingToggleRow(
                         title = "Quick Settings Tile",
@@ -574,39 +557,6 @@ fun OverlaySettingsDialog(
                             onUpdateSettings { it.copy(pinTopBarRightQsTile = checked) }
                         },
                         testTag = "setting_top_bar_right"
-                    )
-
-                    HorizontalDivider(
-                        color = WidgetLeafTheme.palette.glassBorder,
-                        thickness = 0.5.dp,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
-
-                    // Section: Taskbar Integration
-                    SettingsSectionHeader("Taskbar Integration")
-
-                    SettingToggleRow(
-                        title = "Pin to Taskbar (Left)",
-                        subtitle = "Dock launcher pill in persistent left taskbar",
-                        checked = settings.pinTaskbarLeft,
-                        onCheckedChange = { checked ->
-                            onUpdateSettings { it.copy(pinTaskbarLeft = checked) }
-                        },
-                        testTag = "setting_pin_taskbar_left"
-                    )
-
-                    SettingToggleRow(
-                        title = "Show in Running Taskbar (Right)",
-                        subtitle = if (settings.pinToTopBar) {
-                            "Automatically hidden while Pinned to Top Bar is enabled"
-                        } else {
-                            "Show WidgetLeaf pill among active running taskbar items"
-                        },
-                        checked = settings.showInRunningTaskbarRight,
-                        onCheckedChange = { checked ->
-                            onUpdateSettings { it.copy(showInRunningTaskbarRight = checked) }
-                        },
-                        testTag = "setting_running_taskbar_right"
                     )
 
                     HorizontalDivider(

@@ -75,8 +75,8 @@
 - **Rule:** `res/xml/top_bar_accessibility_service.xml` must only use `flagDefault|flagRetrieveInteractiveWindows|flagRequestFilterKeyEvents`.
 - `WidgetLeafTopBarService` renders its own `28×24dp` leaf icon inside the top status bar (`y = 0`, `LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS`, `FLAG_LAYOUT_IN_SCREEN or FLAG_LAYOUT_NO_LIMITS`) and uses `StatusBarSpaceScanner` to coexist with `BentoBar` (`com.bentobar` / `bento`).
 
-### INV-8: Taskbar Running Icon vs. Top Bar Pinning
-- **Rule:** `OverlaySettings.effectiveShowInRunningTaskbar` returns `!pinToTopBar && showInRunningTaskbarRight`. Whenever `pinToTopBar` is enabled, `TaskbarPlacementManager` sets `setExcludeFromRecents(true)` so the running icon does not duplicate in the right taskbar.
+### INV-8: Top Bar As Primary Entry Point & Taskbar Recents Exclusion
+- **Rule:** WidgetLeaf's primary desktop entry point is the top status bar leaf icon (`WidgetLeafTopBarService`, positioned at `TopBarPosition.LEFT` or `RIGHT`). To prevent visual clutter and duplicate entry points on desktop environments, `WidgetDeckActivity` is ALWAYS excluded from recents (`task.setExcludeFromRecents(true)` via `TaskbarPlacementManager`). It never appears in the right-side running taskbar. The legacy taskbar settings have been removed in favor of a single setting: "Top Bar Position: Left | Right".
 
 ---
 

@@ -401,19 +401,12 @@ class DeckScreenComposeTest {
         composeTestRule.onNodeWithTag("setting_top_bar_position_left").performScrollTo().performClick()
         assertThat(currentSettings.topBarPosition).isEqualTo(TopBarPosition.LEFT)
 
-        // While pinned to top bar, effectiveShowInRunningTaskbar is false
-        assertThat(currentSettings.effectiveShowInRunningTaskbar).isFalse()
+        // Verify removed settings nodes do not exist in the UI tree
+        composeTestRule.onNodeWithTag("setting_top_bar_left").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("setting_running_taskbar_right").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("setting_pin_taskbar_left").assertDoesNotExist()
 
-        // Toggle 3: showInRunningTaskbarRight (default is true -> toggles to false)
-        composeTestRule.onNodeWithTag("setting_running_taskbar_right").performScrollTo().performClick()
-        assertThat(currentSettings.showInRunningTaskbarRight).isFalse()
-
-        // Toggle 4: pinToTopBar / pinTopBarLeftStatusIcon (default is true -> toggles to false)
-        composeTestRule.onNodeWithTag("setting_top_bar_left").performScrollTo().performClick()
-        assertThat(currentSettings.pinTopBarLeftStatusIcon).isFalse()
-        assertThat(currentSettings.pinToTopBar).isFalse()
-
-        // Toggle 5: useDynamicColor
+        // Toggle 3: useDynamicColor
         composeTestRule.onNodeWithTag("setting_dynamic_color").performScrollTo().performClick()
         assertThat(currentSettings.useDynamicColor).isTrue()
     }

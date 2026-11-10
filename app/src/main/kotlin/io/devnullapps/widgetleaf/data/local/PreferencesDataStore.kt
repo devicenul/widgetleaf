@@ -30,11 +30,7 @@ class PreferencesDataStore(
         val KEY_OPEN_ON_PAGE_ONE = booleanPreferencesKey("open_on_page_one")
         val KEY_LAST_VIEWED_PAGE_INDEX = intPreferencesKey("last_viewed_page_index")
         val KEY_LAUNCH_ON_STARTUP = booleanPreferencesKey("launch_on_startup")
-        val KEY_PIN_TASKBAR_LEFT = booleanPreferencesKey("pin_taskbar_left")
-        val KEY_SHOW_IN_RUNNING_TASKBAR_RIGHT = booleanPreferencesKey("show_in_running_taskbar_right")
-        val KEY_PIN_TOP_BAR_LEFT_STATUS_ICON = booleanPreferencesKey("pin_top_bar_left_status_icon")
         val KEY_PIN_TOP_BAR_RIGHT_QS_TILE = booleanPreferencesKey("pin_top_bar_right_qs_tile")
-        val KEY_PIN_TO_TOP_BAR = booleanPreferencesKey("pin_to_top_bar")
         val KEY_TOP_BAR_POSITION = stringPreferencesKey("top_bar_position")
         val KEY_HOTKEY_KEY_CODE = intPreferencesKey("hotkey_key_code")
         val KEY_HOTKEY_CTRL = booleanPreferencesKey("hotkey_ctrl")
@@ -42,6 +38,12 @@ class PreferencesDataStore(
         val KEY_HOTKEY_SHIFT = booleanPreferencesKey("hotkey_shift")
         val KEY_HOTKEY_META = booleanPreferencesKey("hotkey_meta")
         val KEY_USE_CENTERED_BENTO_CANVAS = booleanPreferencesKey("use_centered_bento_canvas")
+
+        // Legacy keys migrated and removed gracefully
+        private val KEY_LEGACY_PIN_TASKBAR_LEFT = booleanPreferencesKey("pin_taskbar_left")
+        private val KEY_LEGACY_SHOW_IN_RUNNING_TASKBAR_RIGHT = booleanPreferencesKey("show_in_running_taskbar_right")
+        private val KEY_LEGACY_PIN_TOP_BAR_LEFT_STATUS_ICON = booleanPreferencesKey("pin_top_bar_left_status_icon")
+        private val KEY_LEGACY_PIN_TO_TOP_BAR = booleanPreferencesKey("pin_to_top_bar")
 
         @Volatile
         private var INSTANCE: PreferencesDataStore? = null
@@ -55,8 +57,6 @@ class PreferencesDataStore(
         }
 
         private fun toOverlaySettings(preferences: Preferences): OverlaySettings {
-            val legacyPinTopBarLeft = preferences[KEY_PIN_TOP_BAR_LEFT_STATUS_ICON] ?: true
-            val pinToTopBar = preferences[KEY_PIN_TO_TOP_BAR] ?: legacyPinTopBarLeft
             val topBarPosition = when (preferences[KEY_TOP_BAR_POSITION]) {
                 TopBarPosition.RIGHT.name -> TopBarPosition.RIGHT
                 else -> TopBarPosition.LEFT
@@ -68,12 +68,8 @@ class PreferencesDataStore(
                 openOnPageOne = preferences[KEY_OPEN_ON_PAGE_ONE] ?: false,
                 lastViewedPageIndex = preferences[KEY_LAST_VIEWED_PAGE_INDEX] ?: 0,
                 launchOnStartup = preferences[KEY_LAUNCH_ON_STARTUP] ?: false,
-                pinTaskbarLeft = preferences[KEY_PIN_TASKBAR_LEFT] ?: false,
-                showInRunningTaskbarRight = preferences[KEY_SHOW_IN_RUNNING_TASKBAR_RIGHT] ?: true,
-                pinTopBarLeftStatusIcon = pinToTopBar,
-                pinTopBarRightQsTile = preferences[KEY_PIN_TOP_BAR_RIGHT_QS_TILE] ?: false,
-                pinToTopBar = pinToTopBar,
                 topBarPosition = topBarPosition,
+                pinTopBarRightQsTile = preferences[KEY_PIN_TOP_BAR_RIGHT_QS_TILE] ?: false,
                 hotkeyKeyCode = preferences[KEY_HOTKEY_KEY_CODE] ?: KeyEvent.KEYCODE_W,
                 hotkeyCtrl = preferences[KEY_HOTKEY_CTRL] ?: false,
                 hotkeyAlt = preferences[KEY_HOTKEY_ALT] ?: true,
@@ -100,24 +96,13 @@ class PreferencesDataStore(
         dataStore.edit { preferences ->
             val current = toOverlaySettings(preferences)
             val updated = transform(current)
-            val resolvedPinToTopBar = if (updated.pinToTopBar != current.pinToTopBar) {
-                updated.pinToTopBar
-            } else if (updated.pinTopBarLeftStatusIcon != current.pinTopBarLeftStatusIcon) {
-                updated.pinTopBarLeftStatusIcon
-            } else {
-                updated.pinToTopBar
-            }
             preferences[KEY_BLUR_RADIUS_DP] = updated.blurRadiusDp
             preferences[KEY_SCRIM_ALPHA] = updated.scrimAlpha
             preferences[KEY_USE_DYNAMIC_COLOR] = updated.useDynamicColor
             preferences[KEY_OPEN_ON_PAGE_ONE] = updated.openOnPageOne
             preferences[KEY_LAST_VIEWED_PAGE_INDEX] = updated.lastViewedPageIndex
             preferences[KEY_LAUNCH_ON_STARTUP] = updated.launchOnStartup
-            preferences[KEY_PIN_TASKBAR_LEFT] = updated.pinTaskbarLeft
-            preferences[KEY_SHOW_IN_RUNNING_TASKBAR_RIGHT] = updated.showInRunningTaskbarRight
-            preferences[KEY_PIN_TOP_BAR_LEFT_STATUS_ICON] = resolvedPinToTopBar
             preferences[KEY_PIN_TOP_BAR_RIGHT_QS_TILE] = updated.pinTopBarRightQsTile
-            preferences[KEY_PIN_TO_TOP_BAR] = resolvedPinToTopBar
             preferences[KEY_TOP_BAR_POSITION] = updated.topBarPosition.name
             preferences[KEY_HOTKEY_KEY_CODE] = updated.hotkeyKeyCode
             preferences[KEY_HOTKEY_CTRL] = updated.hotkeyCtrl
@@ -125,6 +110,12 @@ class PreferencesDataStore(
             preferences[KEY_HOTKEY_SHIFT] = updated.hotkeyShift
             preferences[KEY_HOTKEY_META] = updated.hotkeyMeta
             preferences[KEY_USE_CENTERED_BENTO_CANVAS] = updated.useCenteredBentoCanvas
+
+            // Clean up legacy keys
+            preferences.remove(KEY_LEGACY_PIN_TASKBAR_LEFT)
+            preferences.remove(KEY_LEGACY_SHOW_IN_RUNNING_TASKBAR_RIGHT)
+            preferences.remove(KEY_LEGACY_PIN_TOP_BAR_LEFT_STATUS_ICON)
+            preferences.remove(KEY_LEGACY_PIN_TO_TOP_BAR)
         }
     }
 }

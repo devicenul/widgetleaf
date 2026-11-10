@@ -52,11 +52,11 @@ class WidgetLeafTopBarService : AccessibilityService() {
     private lateinit var keyguardManager: KeyguardManager
     private lateinit var powerManager: PowerManager
 
-    private var currentSettings: OverlaySettings = OverlaySettings()
-    private var stripContainer: FrameLayout? = null
+    internal var currentSettings: OverlaySettings = OverlaySettings()
+    internal var stripContainer: FrameLayout? = null
     private var hoverPillBg: GradientDrawable? = null
     private var iconView: ImageView? = null
-    private var layoutParams: WindowManager.LayoutParams? = null
+    internal var layoutParams: WindowManager.LayoutParams? = null
     private var isWindowAttached = false
 
     private val rescanRunnable = Runnable {
@@ -65,14 +65,14 @@ class WidgetLeafTopBarService : AccessibilityService() {
 
     private val periodicPollRunnable = object : Runnable {
         override fun run() {
-            if (powerManager.isInteractive && currentSettings.pinToTopBar) {
+            if (powerManager.isInteractive) {
                 refreshTopBarPlacement()
             }
             mainHandler.postDelayed(this, 2500L)
         }
     }
 
-    override fun onServiceConnected() {
+    public override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         windowManager = getSystemService(WindowManager::class.java)
@@ -85,10 +85,7 @@ class WidgetLeafTopBarService : AccessibilityService() {
                 .collectLatest { settings ->
                     currentSettings = settings
                     DefaultServicesContainer.getTaskbarPlacementManager(applicationContext)
-                        .syncRunningTaskbarPresence(
-                            applicationContext,
-                            settings.effectiveShowInRunningTaskbar
-                        )
+                        .syncRunningTaskbarPresence(applicationContext)
                     updateStripVisibilityAndPosition()
                 }
         }
@@ -103,7 +100,7 @@ class WidgetLeafTopBarService : AccessibilityService() {
         }
     }
 
-    override fun onKeyEvent(event: KeyEvent): Boolean {
+    public override fun onKeyEvent(event: KeyEvent): Boolean {
         if (currentSettings.matchesKeyEvent(event)) {
             ActiveDisplayLaunchHelper.launchOverlay(
                 this,
@@ -147,11 +144,7 @@ class WidgetLeafTopBarService : AccessibilityService() {
         mainHandler.postDelayed(rescanRunnable, 400L)
     }
 
-    private fun updateStripVisibilityAndPosition() {
-        if (!currentSettings.pinToTopBar) {
-            detachWindowIfNeeded()
-            return
-        }
+    internal fun updateStripVisibilityAndPosition() {
         ensureWindowAttached()
         refreshTopBarPlacement()
     }
@@ -270,10 +263,10 @@ class WidgetLeafTopBarService : AccessibilityService() {
         iconView?.setColorFilter(Color.WHITE)
     }
 
-    private fun refreshTopBarPlacement() {
+    internal fun refreshTopBarPlacement() {
         val container = stripContainer ?: return
         val params = layoutParams ?: return
-        if (!isWindowAttached || !currentSettings.pinToTopBar) {
+        if (!isWindowAttached) {
             container.visibility = View.INVISIBLE
             return
         }

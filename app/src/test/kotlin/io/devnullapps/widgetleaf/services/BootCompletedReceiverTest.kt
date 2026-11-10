@@ -58,7 +58,7 @@ class BootCompletedReceiverTest {
                 }
             },
             settingsProvider = {
-                OverlaySettings(launchOnStartup = true, pinTopBarLeftStatusIcon = false)
+                OverlaySettings(launchOnStartup = true)
             },
             dispatcher = Dispatchers.Unconfined
         )
@@ -70,7 +70,7 @@ class BootCompletedReceiverTest {
     }
 
     @Test
-    fun onReceiveWithBootCompletedAndLaunchOnStartupFalseCancelsTriggers() {
+    fun onReceiveWithBootCompletedRestoresTopBarTriggersAlways() {
         var syncTriggerCalled: Boolean? = null
         var syncShortcutsCalled = false
 
@@ -91,19 +91,19 @@ class BootCompletedReceiverTest {
                 }
             },
             settingsProvider = {
-                OverlaySettings(launchOnStartup = false, pinTopBarLeftStatusIcon = false)
+                OverlaySettings(launchOnStartup = false)
             },
             dispatcher = Dispatchers.Unconfined
         )
 
         receiver.onReceive(context, Intent(Intent.ACTION_BOOT_COMPLETED))
 
-        assertThat(syncTriggerCalled).isEqualTo(false)
-        assertThat(syncShortcutsCalled).isFalse()
+        assertThat(syncTriggerCalled).isEqualTo(true)
+        assertThat(syncShortcutsCalled).isTrue()
     }
 
     @Test
-    fun onReceiveWithPinTopBarLeftStatusIconTrueEnablesStatusTriggerEvenIfLaunchOnStartupFalse() {
+    fun onReceiveWithLockedBootCompletedRestoresTopBarTriggers() {
         var syncTriggerCalled: Boolean? = null
         var syncShortcutsCalled = false
 
@@ -124,7 +124,7 @@ class BootCompletedReceiverTest {
                 }
             },
             settingsProvider = {
-                OverlaySettings(launchOnStartup = false, pinTopBarLeftStatusIcon = true)
+                OverlaySettings(launchOnStartup = false)
             },
             dispatcher = Dispatchers.Unconfined
         )
@@ -197,23 +197,9 @@ class BootCompletedReceiverTest {
     }
 
     @Test
-    fun taskbarPlacementManagerRequestPinToTaskbarLeftHandlesUnsupportedOrSupported() {
-        val result = taskbarPlacementManager.requestPinToTaskbarLeft(context)
-        val sm = context.getSystemService(ShortcutManager::class.java)
-        if (sm.isRequestPinShortcutSupported) {
-            assertThat(result).isTrue()
-        } else {
-            assertThat(result).isFalse()
-        }
-    }
-
-    @Test
     fun taskbarPlacementManagerSyncRunningTaskbarPresenceExecutesCleanly() {
-        taskbarPlacementManager.syncRunningTaskbarPresence(context, keepInRunningTaskbarRight = true)
+        taskbarPlacementManager.syncRunningTaskbarPresence(context)
         val sm = context.getSystemService(ShortcutManager::class.java)
-        assertThat(sm.dynamicShortcuts).hasSize(2)
-
-        taskbarPlacementManager.syncRunningTaskbarPresence(context, keepInRunningTaskbarRight = false)
         assertThat(sm.dynamicShortcuts).hasSize(2)
     }
 

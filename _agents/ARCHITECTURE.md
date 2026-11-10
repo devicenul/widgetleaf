@@ -34,15 +34,15 @@ Pure Kotlin models and deterministic use cases with zero Android UI dependencies
   - `deck_pages` (`DeckPageEntity`): Stores `pageIndex` (`0 .. N-1`) and optional `customLabel`.
   - `widget_placements` (`WidgetPlacementEntity`): Foreign-keyed to `deck_pages` (`ON DELETE CASCADE`) with indices on `pageIndex` and `(pageIndex, cellX, cellY)`.
 - **`DefaultWidgetDeckRepository`:** Executes multi-widget moves, edge transfers, and empty-page pruning inside `database.withTransaction { ... }`. Always guarantees Page `0` exists and re-packs remaining page indices contiguously (`0 .. K-1`) when an empty trailing/intermediate page is pruned.
-- **`PreferencesDataStore`:** Persists `OverlaySettings` (`openOnPageOne`, `launchOnStartup`, `pinTaskbarLeft`, `showInRunningTaskbarRight`, `pinTopBarLeftStatusIcon`, `topBarPosition`, `enableQuickSettingsTileRight`, `hotkeyKeyCode`, `hotkeyModifiers`, `blurRadiusDp`, `scrimAlpha`, `useDynamicColor`, `lastActivePageIndex`).
+- **`PreferencesDataStore`:** Persists `OverlaySettings` (`openOnPageOne`, `launchOnStartup`, `topBarPosition`, `pinTopBarRightQsTile`, `hotkeyKeyCode`, `hotkeyModifiers`, `blurRadiusDp`, `scrimAlpha`, `useDynamicColor`, `lastActivePageIndex`, `useCenteredBentoCanvas`).
 
 ### 1.3 Platform & Services Layer (`platform/` & `services/`)
 - **`WidgetLeafTopBarService` (`AccessibilityService`):**
   - Renders a compact `28×24dp` clickable leaf pill directly inside the Android Desktop top status bar (`Gravity.TOP or Gravity.START`, `y = 0`) using `WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY` with `LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS`.
   - **BentoBar Coexistence (`StatusBarSpaceScanner`):** Scans the `TYPE_WINDOWS_CHANGED` / root accessibility hierarchy for existing status-bar clock/notification clusters and third-party overlays (`BentoBar`) so the WidgetLeaf icon automatically offsets its horizontal `x` coordinate (`Left` or `Right` of the center gap) without colliding.
   - **Global Hotkey Interception (`onKeyEvent`):** Intercepts the user-configured global hotkey (default `Alt + W`) system-wide and toggles `WidgetDeckActivity`.
-- **`StatusBarTriggerManager`:** Posts a low-priority ongoing status-bar notification when `pinToTopBar` is enabled and synchronizes `WidgetLeafTopBarService` state.
-- **`TaskbarPlacementManager`:** Dynamically toggles `ActivityManager.AppTask.setExcludeFromRecents(...)` based on `OverlaySettings.effectiveShowInRunningTaskbar`. When pinned to the top bar (`pinToTopBar == true`), `effectiveShowInRunningTaskbar` evaluates to `false` so WidgetLeaf does not clutter the running taskbar on the right.
+- **`StatusBarTriggerManager`:** Posts a low-priority ongoing silent status-bar notification trigger for immediate access to WidgetLeaf and settings.
+- **`TaskbarPlacementManager`:** Ensures `ActivityManager.AppTask.setExcludeFromRecents(true)` is always set so WidgetLeaf never duplicates in the right-side running taskbar (since WidgetLeaf's primary desktop home is the top bar), and updates dynamic launcher shortcuts for desktop right-click access to Add Widget and Overlay Settings.
 - **`BootCompletedReceiver`:** Listens for `ACTION_BOOT_COMPLETED` / `ACTION_MY_PACKAGE_REPLACED` and restores background triggers (`StatusBarTriggerManager`, `WidgetDeckTileService`) in the background **without** popping open the overlay UI.
 
 ### 1.4 UI Layer (`ui/`)

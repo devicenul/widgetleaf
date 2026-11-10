@@ -14,12 +14,8 @@ data class OverlaySettings(
     val openOnPageOne: Boolean = false,
     val lastViewedPageIndex: Int = 0,
     val launchOnStartup: Boolean = false,
-    val pinTaskbarLeft: Boolean = false,
-    val showInRunningTaskbarRight: Boolean = true,
-    val pinTopBarLeftStatusIcon: Boolean = true,
-    val pinTopBarRightQsTile: Boolean = false,
-    val pinToTopBar: Boolean = pinTopBarLeftStatusIcon,
     val topBarPosition: TopBarPosition = TopBarPosition.LEFT,
+    val pinTopBarRightQsTile: Boolean = false,
     val hotkeyKeyCode: Int = KeyEvent.KEYCODE_W,
     val hotkeyCtrl: Boolean = false,
     val hotkeyAlt: Boolean = true,
@@ -27,11 +23,6 @@ data class OverlaySettings(
     val hotkeyMeta: Boolean = false,
     val useCenteredBentoCanvas: Boolean = true
 ) {
-    /**
-     * When WidgetLeaf is pinned to the top bar, hide the running taskbar icon to avoid duplicates.
-     */
-    val effectiveShowInRunningTaskbar: Boolean
-        get() = showInRunningTaskbarRight && !pinToTopBar
 
     fun formatHotkeyLabel(): String {
         if (hotkeyKeyCode <= 0) return "None"

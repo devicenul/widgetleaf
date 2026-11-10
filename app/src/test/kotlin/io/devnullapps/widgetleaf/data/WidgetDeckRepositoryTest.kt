@@ -15,6 +15,7 @@ import io.devnullapps.widgetleaf.data.repository.DefaultWidgetDeckRepository
 import io.devnullapps.widgetleaf.domain.model.DeckPage
 import io.devnullapps.widgetleaf.domain.model.OverlaySettings
 import io.devnullapps.widgetleaf.domain.model.PlacedWidget
+import io.devnullapps.widgetleaf.domain.model.TopBarPosition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -238,9 +239,7 @@ class WidgetDeckRepositoryTest {
         assertThat(initial.openOnPageOne).isFalse()
         assertThat(initial.lastViewedPageIndex).isEqualTo(0)
         assertThat(initial.launchOnStartup).isFalse()
-        assertThat(initial.pinTaskbarLeft).isFalse()
-        assertThat(initial.showInRunningTaskbarRight).isTrue()
-        assertThat(initial.pinTopBarLeftStatusIcon).isTrue()
+        assertThat(initial.topBarPosition).isEqualTo(TopBarPosition.LEFT)
         assertThat(initial.pinTopBarRightQsTile).isFalse()
         assertThat(initial.useCenteredBentoCanvas).isTrue()
 
@@ -253,9 +252,7 @@ class WidgetDeckRepositoryTest {
                 openOnPageOne = true,
                 lastViewedPageIndex = 3,
                 launchOnStartup = true,
-                pinTaskbarLeft = true,
-                showInRunningTaskbarRight = false,
-                pinTopBarLeftStatusIcon = false,
+                topBarPosition = TopBarPosition.RIGHT,
                 pinTopBarRightQsTile = true,
                 useCenteredBentoCanvas = false
             )
@@ -268,9 +265,7 @@ class WidgetDeckRepositoryTest {
         assertThat(updated.openOnPageOne).isTrue()
         assertThat(updated.lastViewedPageIndex).isEqualTo(3)
         assertThat(updated.launchOnStartup).isTrue()
-        assertThat(updated.pinTaskbarLeft).isTrue()
-        assertThat(updated.showInRunningTaskbarRight).isFalse()
-        assertThat(updated.pinTopBarLeftStatusIcon).isFalse()
+        assertThat(updated.topBarPosition).isEqualTo(TopBarPosition.RIGHT)
         assertThat(updated.pinTopBarRightQsTile).isTrue()
         assertThat(updated.useCenteredBentoCanvas).isFalse()
     }

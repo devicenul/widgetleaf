@@ -60,7 +60,6 @@ class WidgetDeckActivity : ComponentActivity() {
         private set
 
     private var wasAlreadyResumed: Boolean = false
-    private var lastPinTaskbarLeftState: Boolean = false
     private var lastPinTopBarRightState: Boolean = false
     private var hasRequestedNotificationPermission: Boolean = false
     private var lastSecondaryClickUptimeMs: Long = -10_000L
@@ -70,9 +69,7 @@ class WidgetDeckActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted && ::viewModel.isInitialized) {
-            container.statusBarTriggerManager.syncStatusBarTrigger(
-                viewModel.uiState.value.settings.pinTopBarLeftStatusIcon
-            )
+            container.statusBarTriggerManager.syncStatusBarTrigger(true)
         }
     }
 
@@ -174,8 +171,7 @@ class WidgetDeckActivity : ComponentActivity() {
             LaunchedEffect(uiState.settings) {
                 val settings = uiState.settings
                 container.blurController.updateBlurRadius(window, settings.blurRadiusDp)
-                if (settings.pinToTopBar &&
-                    !hasRequestedNotificationPermission &&
+                if (!hasRequestedNotificationPermission &&
                     Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                     checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
                 ) {
@@ -186,22 +182,14 @@ class WidgetDeckActivity : ComponentActivity() {
                         // Ignored in headless test environments
                     }
                 }
-                container.statusBarTriggerManager.syncStatusBarTrigger(settings.pinToTopBar)
-                container.taskbarPlacementManager.syncRunningTaskbarPresence(
-                    this@WidgetDeckActivity,
-                    settings.effectiveShowInRunningTaskbar
-                )
+                container.statusBarTriggerManager.syncStatusBarTrigger(true)
+                container.taskbarPlacementManager.syncRunningTaskbarPresence(this@WidgetDeckActivity)
 
                 val updatedProfile = container.gridProfileResolver.resolve(
                     context = this@WidgetDeckActivity,
                     useCenteredBentoCanvas = settings.useCenteredBentoCanvas
                 )
                 viewModel.updateGridProfile(updatedProfile)
-
-                if (settings.pinTaskbarLeft && !lastPinTaskbarLeftState) {
-                    container.taskbarPlacementManager.requestPinToTaskbarLeft(this@WidgetDeckActivity)
-                }
-                lastPinTaskbarLeftState = settings.pinTaskbarLeft
 
                 if (settings.pinTopBarRightQsTile && !lastPinTopBarRightState) {
                     WidgetDeckTileService.requestPinQsTile(this@WidgetDeckActivity)

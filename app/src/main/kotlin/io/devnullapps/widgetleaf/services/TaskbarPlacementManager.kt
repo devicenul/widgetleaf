@@ -8,9 +8,8 @@ import android.graphics.drawable.Icon
 import io.devnullapps.widgetleaf.R
 
 /**
- * Manages Taskbar placement for WidgetLeaf in desktop environments:
- * - Left side of Taskbar (Pinned shelf shortcut via [ShortcutManager.requestPinShortcut])
- * - Right side of Taskbar (Running Apps section via [ActivityManager.AppTask.setExcludeFromRecents])
+ * Manages Taskbar presence and launcher shortcuts for WidgetLeaf in desktop environments:
+ * - Always excludes overlay tasks from recents/running taskbar so it doesn't duplicate the top-bar entry point.
  * - Dynamic shortcuts for right-click / Ctrl-click access to Add Widget and Overlay Settings.
  */
 open class TaskbarPlacementManager(
@@ -18,7 +17,6 @@ open class TaskbarPlacementManager(
 ) {
 
     companion object {
-        const val PIN_SHORTCUT_ID = "taskbar_pin_widgetleaf"
         const val SHORTCUT_ADD_WIDGET = "shortcut_add_widget"
         const val SHORTCUT_OVERLAY_SETTINGS = "shortcut_overlay_settings"
     }
@@ -29,41 +27,14 @@ open class TaskbarPlacementManager(
     }
 
     /**
-     * Requests pinning the WidgetLeaf toggle shortcut to the left/center dock of the taskbar.
+     * Ensures the overlay task is excluded from the "Running Apps" section of the taskbar
+     * (as WidgetLeaf lives in the top bar) and updates dynamic shortcuts for right-click desktop actions.
      */
-    open fun requestPinToTaskbarLeft(context: Context): Boolean {
-        val shortcutManager = getShortcutManager(context) ?: return false
-        if (!shortcutManager.isRequestPinShortcutSupported) {
-            return false
-        }
-
-        val pinShortcutInfo = ShortcutInfo.Builder(context, PIN_SHORTCUT_ID)
-            .setShortLabel(context.getString(R.string.app_name))
-            .setIcon(Icon.createWithResource(context, R.drawable.ic_taskbar_pin))
-            .setIntent(
-                ActiveDisplayLaunchHelper.createLaunchIntent(
-                    context,
-                    ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
-                )
-            )
-            .build()
-
-        return try {
-            shortcutManager.requestPinShortcut(pinShortcutInfo, null)
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    /**
-     * Synchronizes whether the overlay task appears in the "Running Apps" section on the right side
-     * of the taskbar divider, and updates dynamic shortcuts for right-click desktop actions.
-     */
-    open fun syncRunningTaskbarPresence(context: Context, keepInRunningTaskbarRight: Boolean) {
+    open fun syncRunningTaskbarPresence(context: Context, keepInRunningTaskbarRight: Boolean = false) {
         val activityManager = context.getSystemService(ActivityManager::class.java)
         try {
             activityManager?.appTasks?.forEach { task ->
-                task.setExcludeFromRecents(!keepInRunningTaskbarRight)
+                task.setExcludeFromRecents(true)
             }
         } catch (_: Throwable) {
             // Ignored if app tasks cannot be accessed from this context

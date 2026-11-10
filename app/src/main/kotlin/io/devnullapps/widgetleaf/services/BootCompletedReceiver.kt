@@ -13,8 +13,7 @@ import kotlinx.coroutines.launch
 /**
  * BroadcastReceiver triggered on system startup or package replacement.
  *
- * Restores user-configured top-bar status trigger and taskbar dynamic shortcuts
- * when [OverlaySettings.launchOnStartup] or [OverlaySettings.pinTopBarLeftStatusIcon] is enabled.
+ * Restores user-configured top-bar status trigger and taskbar dynamic shortcuts.
  */
 class BootCompletedReceiver(
     private val statusBarTriggerManagerProvider: (Context) -> StatusBarTriggerManager = {
@@ -57,20 +56,12 @@ class BootCompletedReceiver(
 
         CoroutineScope(dispatcher).launch {
             try {
+                // Read settings to ensure preferences are initialized
                 val settings = settingsProvider?.invoke(context)
                     ?: DefaultServicesContainer.getPreferencesDataStore(context).settingsFlow.first()
 
-                val shouldEnableTopBar = settings.launchOnStartup ||
-                    settings.pinToTopBar ||
-                    settings.pinTopBarLeftStatusIcon
-                statusBarTriggerManager.syncStatusBarTrigger(shouldEnableTopBar)
-
-                if (shouldEnableTopBar) {
-                    taskbarPlacementManager.syncRunningTaskbarPresence(
-                        context,
-                        settings.effectiveShowInRunningTaskbar
-                    )
-                }
+                statusBarTriggerManager.syncStatusBarTrigger(true)
+                taskbarPlacementManager.syncRunningTaskbarPresence(context)
             } finally {
                 pendingResult?.finish()
             }
