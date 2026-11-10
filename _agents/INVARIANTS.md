@@ -134,3 +134,13 @@
   4. During page flips, the dragged widget remains anchored under the pointer; live cascade preview (250 ms debounce) runs on the newly active page.
   5. Dropping commits atomically via `CascadeDisplacementResolver` and prunes trailing empty/speculative pages. Cancelling (or `Escape`) reverts everything to the drag-start snapshot and restores the original page index. The old drop-at-edge bump path is removed.
 
+### INV-18: Swipe Gesture Routing, Trackpad Classification & Hotkey Toggle Semantics
+- **Why:** Full-screen overlay applications on Android Desktop must support natural touch and trackpad navigation (page flips and dismissals) while coexisting with interactive widgets (e.g. scrollable calendars, carousels), excluding traditional mouse wheels, disabling gestures during widget edits, and ensuring hotkey presses toggle cleanly without repeat races.
+- **Rule:**
+  1. **Touch Swipes (`PointerEventPass.Initial`):** 1-finger horizontal swipes flip pages (swipe left → next, swipe right → previous). 1-finger vertical swipes (up or down) dismiss the overlay pane. Both require 1.2x dominant axis locking. Over widgets, gestures query `canChildScrollHorizontally` or `canChildScrollVertically`; if the child widget can scroll in the gesture direction, the gesture is not claimed. If the widget cannot scroll (or over empty background), the gesture claims the pointer stream, consumes subsequent events in Initial pass, and invokes `cancelChildTouches()`.
+  2. **Page Boundaries:** Swipe page navigation is strictly non-wrapping (stops at Page 0 and last page; never wraps around and never synthesizes speculative pages).
+  3. **Trackpad vs. Mouse Wheel Distinction:** Regular mouse wheels (`TOOL_TYPE_MOUSE`, discrete integer scroll steps) must NEVER page or dismiss. Trackpads are recognized via Android 14+ `CLASSIFICATION_TWO_FINGER_SWIPE` / `MULTI_FINGER_SWIPE`, non-zero `AXIS_GESTURE_SCROLL_X_DISTANCE` / `Y_DISTANCE`, `SOURCE_TOUCHPAD`, or `TOOL_TYPE_FINGER`. Trackpad deltas follow natural scrolling and are accumulated with dominant-axis locking in `TrackpadSwipeAccumulator`.
+  4. **Edit Mode Guard:** All touch and trackpad swipe gestures are strictly disabled whenever any widget is in edit mode (`editingWidgetId != null`).
+  5. **Consistent Hotkey Toggle & Debounce:** Pressing the global hotkey combo (default `Alt + W`), clicking the top status bar leaf pill, or triggering `ToggleDeckShortcutActivity` toggles the overlay: visible → dismiss; hidden → open. Debounces key repeats (350 ms). Non-navigation key dismissal is suppressed during the initial 300 ms after creation and on the hotkey keyCode itself, preventing key release races from dismissing newly opened windows.
+
+

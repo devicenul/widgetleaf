@@ -4,13 +4,16 @@ import android.app.Application
 import android.appwidget.AppWidgetManager
 import android.content.Intent
 import android.service.quicksettings.TileService
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 import io.devnullapps.widgetleaf.domain.model.WidgetCatalogItem
 import io.devnullapps.widgetleaf.services.ActiveDisplayLaunchHelper
+import io.devnullapps.widgetleaf.ui.gesture.TrackpadGestureClassifier
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -30,6 +33,13 @@ class WidgetDeckActivityTest {
         shadowAppWidgetManager.setValidWidgetProviderComponentName(true)
     }
 
+    @org.junit.After
+    fun tearDown() {
+        WidgetDeckActivity.activeInstance = null
+        WidgetDeckActivity.isDeckVisible = false
+        Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+    }
+
     private fun tearDownController(controller: org.robolectric.android.controller.ActivityController<WidgetDeckActivity>) {
         try {
             val activity = controller.get()
@@ -42,6 +52,9 @@ class WidgetDeckActivityTest {
             Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
         } catch (_: Throwable) {
         }
+        WidgetDeckActivity.activeInstance = null
+        WidgetDeckActivity.isDeckVisible = false
+        Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
     }
 
     @Test
@@ -336,11 +349,315 @@ class WidgetDeckActivityTest {
                 val activity = controller.get()
                 assertThat(activity.isFinishing).isFalse()
 
+                // Fast forward past initial 300ms creation debounce window
+                android.os.SystemClock.sleep(350L)
+
                 activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
                 assertThat(activity.isFinishing).isTrue()
             } finally {
-                controller.pause().stop().destroy()
+                tearDownController(controller)
             }
+        }
+    }
+
+    private fun createTrackpadMotionEvent(
+        x: Float = 500f,
+        y: Float = 500f,
+        dx: Float = 0f,
+        dy: Float = 0f,
+        uptimeMs: Long = android.os.SystemClock.uptimeMillis()
+    ): MotionEvent {
+        val props = arrayOf(
+            MotionEvent.PointerProperties().apply {
+                id = 0
+                toolType = MotionEvent.TOOL_TYPE_FINGER
+            }
+        )
+        val coords = arrayOf(
+            MotionEvent.PointerCoords().apply {
+                this.x = x
+                this.y = y
+                setAxisValue(TrackpadGestureClassifier.AXIS_GESTURE_SCROLL_X_DISTANCE, dx)
+                setAxisValue(TrackpadGestureClassifier.AXIS_GESTURE_SCROLL_Y_DISTANCE, dy)
+                setAxisValue(MotionEvent.AXIS_HSCROLL, dx)
+                setAxisValue(MotionEvent.AXIS_VSCROLL, dy)
+            }
+        )
+        return MotionEvent.obtain(
+            uptimeMs,
+            uptimeMs,
+            MotionEvent.ACTION_SCROLL,
+            1,
+            props,
+            coords,
+            0,
+            0,
+            1f,
+            1f,
+            0,
+            0,
+            InputDevice.SOURCE_MOUSE or InputDevice.SOURCE_TOUCHPAD,
+            0
+        )
+    }
+
+    private fun createMouseWheelMotionEvent(
+        x: Float = 500f,
+        y: Float = 500f,
+        vScroll: Float = 1.0f,
+        hScroll: Float = 0.0f
+    ): MotionEvent {
+        val now = android.os.SystemClock.uptimeMillis()
+        val props = arrayOf(
+            MotionEvent.PointerProperties().apply {
+                id = 0
+                toolType = MotionEvent.TOOL_TYPE_MOUSE
+            }
+        )
+        val coords = arrayOf(
+            MotionEvent.PointerCoords().apply {
+                this.x = x
+                this.y = y
+                setAxisValue(MotionEvent.AXIS_VSCROLL, vScroll)
+                setAxisValue(MotionEvent.AXIS_HSCROLL, hScroll)
+            }
+        )
+        return MotionEvent.obtain(
+            now,
+            now,
+            MotionEvent.ACTION_SCROLL,
+            1,
+            props,
+            coords,
+            0,
+            0,
+            1f,
+            1f,
+            0,
+            0,
+            InputDevice.SOURCE_MOUSE,
+            0
+        )
+    }
+
+    @Test
+    fun trackpadTwoFingerSwipe_changesPage_andEnforcesBounds() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            val item = WidgetCatalogItem(
+                providerPackage = "io.devnullapps.test",
+                providerClass = "io.devnullapps.test.TestWidget",
+                appName = "TestApp",
+                widgetLabel = "Clock",
+                defaultSpanX = 8,
+                defaultSpanY = 8,
+                resizeMode = PlacedWidget.RESIZE_BOTH
+            )
+            activity.viewModel.addWidgetAutoPlace(item)
+            activity.viewModel.addWidgetAutoPlace(item)
+            assertThat(activity.viewModel.uiState.value.pages.size).isEqualTo(2)
+
+            // Jump to page 0
+            activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_1))
+            assertThat(activity.viewModel.uiState.value.activePageIndex).isEqualTo(0)
+
+            var t = 1000L
+            // Trackpad swipe right (positive dx) on Page 0: bounds check, stays on Page 0
+            val swipeRightFromZero = createTrackpadMotionEvent(dx = 200f, dy = 0f, uptimeMs = t)
+            activity.dispatchGenericMotionEvent(swipeRightFromZero)
+            swipeRightFromZero.recycle()
+            assertThat(activity.viewModel.uiState.value.activePageIndex).isEqualTo(0)
+
+            t += 500L
+            // Trackpad swipe left (negative dx): advances to Page 1
+            val swipeLeft = createTrackpadMotionEvent(dx = -200f, dy = 0f, uptimeMs = t)
+            activity.dispatchGenericMotionEvent(swipeLeft)
+            swipeLeft.recycle()
+            assertThat(activity.viewModel.uiState.value.activePageIndex).isEqualTo(1)
+
+            t += 500L
+            // Trackpad swipe left on last page: bounds check, stays on Page 1 (no wrap or new pages)
+            val swipeLeftFromLast = createTrackpadMotionEvent(dx = -200f, dy = 0f, uptimeMs = t)
+            activity.dispatchGenericMotionEvent(swipeLeftFromLast)
+            swipeLeftFromLast.recycle()
+            assertThat(activity.viewModel.uiState.value.activePageIndex).isEqualTo(1)
+            assertThat(activity.viewModel.uiState.value.pages.size).isEqualTo(2)
+
+            t += 500L
+            // Trackpad swipe right on Page 1: navigates back to Page 0
+            val swipeRight = createTrackpadMotionEvent(dx = 200f, dy = 0f, uptimeMs = t)
+            activity.dispatchGenericMotionEvent(swipeRight)
+            swipeRight.recycle()
+            assertThat(activity.viewModel.uiState.value.activePageIndex).isEqualTo(0)
+        } finally {
+            tearDownController(controller)
+        }
+    }
+
+    @Test
+    fun trackpadTwoFingerSwipe_verticalDismissOnBackground() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            assertThat(activity.isFinishing).isFalse()
+
+            // Vertical swipe down on background dismisses pane
+            val swipeDown = createTrackpadMotionEvent(dx = 0f, dy = 200f, uptimeMs = 1000L)
+            activity.dispatchGenericMotionEvent(swipeDown)
+            swipeDown.recycle()
+            assertThat(activity.isFinishing).isTrue()
+        } finally {
+            tearDownController(controller)
+        }
+    }
+
+    @Test
+    fun trackpadTwoFingerSwipe_disabledInEditMode() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            val item = WidgetCatalogItem(
+                providerPackage = "io.devnullapps.test",
+                providerClass = "io.devnullapps.test.TestWidget",
+                appName = "TestApp",
+                widgetLabel = "Clock",
+                defaultSpanX = 4,
+                defaultSpanY = 2,
+                resizeMode = PlacedWidget.RESIZE_BOTH
+            )
+            activity.viewModel.addWidgetAutoPlace(item)
+            val placed = activity.viewModel.uiState.value.widgets.first()
+
+            // Enter edit mode
+            activity.viewModel.enterWidgetEditMode(placed.appWidgetId)
+            assertThat(activity.viewModel.uiState.value.editingWidgetId).isEqualTo(placed.appWidgetId)
+
+            // Swipes must NOT change page or dismiss when in edit mode
+            val swipeDown = createTrackpadMotionEvent(dx = 0f, dy = 200f, uptimeMs = 1000L)
+            activity.dispatchGenericMotionEvent(swipeDown)
+            swipeDown.recycle()
+            assertThat(activity.isFinishing).isFalse()
+
+            val swipeLeft = createTrackpadMotionEvent(dx = -200f, dy = 0f, uptimeMs = 1500L)
+            activity.dispatchGenericMotionEvent(swipeLeft)
+            swipeLeft.recycle()
+            assertThat(activity.viewModel.uiState.value.activePageIndex).isEqualTo(0)
+        } finally {
+            tearDownController(controller)
+        }
+    }
+
+    @Test
+    fun regularMouseWheel_doesNotPageOrDismiss() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            // Add two widgets across pages
+            val item = WidgetCatalogItem(
+                providerPackage = "io.devnullapps.test",
+                providerClass = "io.devnullapps.test.TestWidget",
+                appName = "TestApp",
+                widgetLabel = "Clock",
+                defaultSpanX = 8,
+                defaultSpanY = 8,
+                resizeMode = PlacedWidget.RESIZE_BOTH
+            )
+            activity.viewModel.addWidgetAutoPlace(item)
+            activity.viewModel.addWidgetAutoPlace(item)
+            activity.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_1))
+            assertThat(activity.viewModel.uiState.value.activePageIndex).isEqualTo(0)
+
+            // Mouse wheel vertical scroll down: must NOT dismiss and must NOT page
+            val wheelV = createMouseWheelMotionEvent(vScroll = 1.0f)
+            activity.dispatchGenericMotionEvent(wheelV)
+            wheelV.recycle()
+            assertThat(activity.isFinishing).isFalse()
+            assertThat(activity.viewModel.uiState.value.activePageIndex).isEqualTo(0)
+
+            // Mouse wheel horizontal scroll: must NOT page
+            val wheelH = createMouseWheelMotionEvent(vScroll = 0f, hScroll = -1.0f)
+            activity.dispatchGenericMotionEvent(wheelH)
+            wheelH.recycle()
+            assertThat(activity.viewModel.uiState.value.activePageIndex).isEqualTo(0)
+            assertThat(activity.isFinishing).isFalse()
+        } finally {
+            tearDownController(controller)
+        }
+    }
+
+    @Test
+    fun hotkeyToggle_dismissesOverlayWhenOpen_andDebouncesKeyRepeat() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            assertThat(activity.isFinishing).isFalse()
+
+            // Key repeat for hotkey (repeatCount = 1) must be ignored and not dismiss as an "other key"
+            val repeatHotkey = KeyEvent(
+                0L,
+                0L,
+                KeyEvent.ACTION_DOWN,
+                KeyEvent.KEYCODE_W,
+                1,
+                KeyEvent.META_ALT_ON
+            )
+            activity.dispatchKeyEvent(repeatHotkey)
+            assertThat(activity.isFinishing).isFalse()
+
+            // Clean hotkey press (Alt + W) dismisses the active overlay
+            val hotkeyPress = KeyEvent(
+                0L,
+                0L,
+                KeyEvent.ACTION_DOWN,
+                KeyEvent.KEYCODE_W,
+                0,
+                KeyEvent.META_ALT_ON
+            )
+            activity.dispatchKeyEvent(hotkeyPress)
+            assertThat(activity.isFinishing).isTrue()
+        } finally {
+            tearDownController(controller)
+        }
+    }
+
+    @Test
+    fun toggleDeckShortcutActivity_dismissesRunningOverlay() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val deckIntent = Intent(context, WidgetDeckActivity::class.java)
+
+        val deckController = Robolectric.buildActivity(WidgetDeckActivity::class.java, deckIntent).setup()
+        try {
+            val activity = deckController.get()
+            assertThat(activity.isFinishing).isFalse()
+            assertThat(WidgetDeckActivity.activeInstance).isSameInstanceAs(activity)
+            assertThat(WidgetDeckActivity.isDeckVisible).isTrue()
+
+            // Trigger shortcut activity while deck is open
+            val shortcutController = Robolectric.buildActivity(ToggleDeckShortcutActivity::class.java).setup()
+            try {
+                assertThat(activity.isFinishing).isTrue()
+            } finally {
+                shortcutController.pause().stop().destroy()
+                Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            }
+        } finally {
+            tearDownController(deckController)
         }
     }
 }

@@ -15,10 +15,15 @@ import io.devnullapps.widgetleaf.services.ActiveDisplayLaunchHelper
 class ToggleDeckShortcutActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        ActiveDisplayLaunchHelper.launchOverlay(
-            this,
-            ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
-        )
+        val active = WidgetDeckActivity.activeInstance
+        if (active != null && !active.isFinishing && WidgetDeckActivity.isDeckVisible) {
+            active.finish()
+        } else {
+            ActiveDisplayLaunchHelper.launchOverlay(
+                this,
+                ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
+            )
+        }
         finish()
     }
 }

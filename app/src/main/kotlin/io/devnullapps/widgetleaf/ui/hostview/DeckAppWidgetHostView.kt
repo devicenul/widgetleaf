@@ -20,6 +20,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import io.devnullapps.widgetleaf.ui.gesture.TrackpadGestureClassifier
 import kotlin.math.abs
 
 open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) {
@@ -180,17 +181,37 @@ open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
             val vScroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
             val hScroll = event.getAxisValue(MotionEvent.AXIS_HSCROLL)
 
-            val direction = if (vScroll > 0f) -1 else 1
-            val hasScrollableChild = canChildScrollVertically(this, direction)
+            val vDirection = if (vScroll > 0f) -1 else 1
+            val hDirection = if (hScroll > 0f) -1 else 1
+            val hasScrollableChildV = canChildScrollVertically(this, vDirection)
+            val hasScrollableChildH = canChildScrollHorizontally(this, hDirection)
 
-            if (abs(vScroll) >= abs(hScroll) && vScroll != 0f && hasScrollableChild) {
-                super.dispatchGenericMotionEvent(event)
-                return true
-            } else if (abs(hScroll) > abs(vScroll) || (vScroll != 0f && !hasScrollableChild)) {
-                val delta = if (hScroll != 0f) hScroll else vScroll
-                onHorizontalPageScrollListener?.invoke(delta)
+            if (TrackpadGestureClassifier.isMouseWheel(event)) {
+                // REGULAR MOUSE WHEEL: must NOT page or dismiss!
+                if (abs(vScroll) >= abs(hScroll) && vScroll != 0f && hasScrollableChildV) {
+                    super.dispatchGenericMotionEvent(event)
+                    return true
+                }
+                if (abs(hScroll) > abs(vScroll) && hScroll != 0f && hasScrollableChildH) {
+                    super.dispatchGenericMotionEvent(event)
+                    return true
+                }
+                // Mouse wheel over non-scrollable widget: consume to prevent unhandled back or paging
                 return true
             }
+
+            // Trackpad scroll: if a child view can scroll in the gesture direction, let child scroll
+            if (abs(vScroll) >= abs(hScroll) && vScroll != 0f && hasScrollableChildV) {
+                super.dispatchGenericMotionEvent(event)
+                return true
+            }
+            if (abs(hScroll) > abs(vScroll) && hScroll != 0f && hasScrollableChildH) {
+                super.dispatchGenericMotionEvent(event)
+                return true
+            }
+
+            // Otherwise, do not consume here; allow parent Activity / overlay to handle trackpad swipe
+            return false
         }
 
         return super.dispatchGenericMotionEvent(event)
@@ -272,7 +293,7 @@ open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
         }
     }
 
-    private fun cancelChildTouches(event: MotionEvent?) {
+    fun cancelChildTouches(event: MotionEvent? = null) {
         val now = SystemClock.uptimeMillis()
         val downTime = event?.downTime ?: if (downTimeMs > 0L) downTimeMs else now
         val eventTime = event?.eventTime ?: now
@@ -292,6 +313,14 @@ open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
         }
     }
 
+    fun canChildScrollVertically(direction: Int): Boolean {
+        return canChildScrollVertically(this, direction)
+    }
+
+    fun canChildScrollHorizontally(direction: Int): Boolean {
+        return canChildScrollHorizontally(this, direction)
+    }
+
     private fun canChildScrollVertically(view: View, direction: Int): Boolean {
         if (view.visibility != View.VISIBLE) {
             return false
@@ -300,7 +329,14 @@ open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
             if (view.canScrollVertically(direction)) {
                 return true
             }
-            if (view is AbsListView || view is ScrollView || view.javaClass.name.contains("StackView")) {
+            val className = view.javaClass.name
+            if (view is AbsListView || view is ScrollView ||
+                className.contains("ScrollView") ||
+                className.contains("NestedScrollView") ||
+                className.contains("RecyclerView") ||
+                className.contains("ListView") ||
+                className.contains("StackView")
+            ) {
                 return true
             }
         }
@@ -308,6 +344,34 @@ open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
             for (i in 0 until view.childCount) {
                 val child = view.getChildAt(i)
                 if (canChildScrollVertically(child, direction)) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private fun canChildScrollHorizontally(view: View, direction: Int): Boolean {
+        if (view.visibility != View.VISIBLE) {
+            return false
+        }
+        if (view !== this) {
+            if (view.canScrollHorizontally(direction)) {
+                return true
+            }
+            val className = view.javaClass.name
+            if (className.contains("HorizontalScrollView") ||
+                className.contains("ViewPager") ||
+                className.contains("Gallery") ||
+                className.contains("StackView")
+            ) {
+                return true
+            }
+        }
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val child = view.getChildAt(i)
+                if (canChildScrollHorizontally(child, direction)) {
                     return true
                 }
             }
