@@ -13,9 +13,11 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -32,6 +34,7 @@ import io.devnullapps.widgetleaf.domain.model.OverlaySettings
 import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 import io.devnullapps.widgetleaf.domain.model.WidgetCatalogItem
 import io.devnullapps.widgetleaf.domain.usecase.EdgeDirection
+import io.devnullapps.widgetleaf.platform.DesktopGridProfileResolver
 import io.devnullapps.widgetleaf.ui.theme.MotionSpec
 import io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckUiState
@@ -54,46 +57,66 @@ fun WidgetDeckOverlayScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    WidgetDeckOverlayScreen(
-        uiState = uiState,
-        onDismissOverlay = onDismissOverlay,
-        onSelectPage = viewModel::selectPage,
-        onPreviousPage = viewModel::navigatePreviousPage,
-        onNextPage = viewModel::navigateNextPage,
-        onOpenWidgetPicker = viewModel::openWidgetPicker,
-        onCloseWidgetPicker = viewModel::closeWidgetPicker,
-        onSearchQueryChange = viewModel::updateWidgetSearchQuery,
-        onAddWidgetAutoPlace = viewModel::addWidgetAutoPlace,
-        onDragOutCatalogItem = { item, cellX, cellY ->
-            viewModel.dropCatalogWidgetAtCell(item, uiState.activePageIndex, cellX, cellY)
-        },
-        onOpenOverlaySettings = viewModel::openOverlaySettings,
-        onCloseOverlaySettings = viewModel::closeOverlaySettings,
-        onUpdateSettings = viewModel::updateSettings,
-        onStartEditPageLabel = viewModel::startEditingPageLabel,
-        onDraftChange = viewModel::updateEditingPageLabelDraft,
-        onCommitPageLabel = viewModel::commitPageLabel,
-        onCancelEditPageLabel = viewModel::cancelEditingPageLabel,
-        onEnterEditMode = viewModel::enterWidgetEditMode,
-        onExitEditMode = viewModel::exitWidgetEditMode,
-        onMoveWidget = { id, x, y ->
-            viewModel.moveWidget(id, x, y)
-        },
-        onResizeWidget = { id, x, y, sx, sy ->
-            viewModel.resizeWidget(id, x, y, sx, sy)
-        },
-        onStartWidgetDrag = viewModel::startWidgetDrag,
-        onWidgetHoverCellChanged = viewModel::onWidgetHoverCellChanged,
-        onCommitWidgetDrag = viewModel::commitWidgetDrag,
-        onCancelWidgetDrag = viewModel::cancelWidgetDrag,
-        onDragAcrossEdge = viewModel::dragWidgetAcrossEdge,
-        onRemoveWidget = viewModel::removeWidget,
-        onReconfigureWidget = { /* Handled by host activity/flow */ },
-        onOpenContextMenu = viewModel::openContextMenu,
-        onCloseContextMenu = viewModel::closeContextMenu,
-        modifier = modifier,
-        widgetContent = widgetContent
-    )
+    BoxWithConstraints(
+        modifier = modifier.fillMaxSize()
+    ) {
+        val widthDp = maxWidth.value
+        val heightDp = maxHeight.value
+
+        LaunchedEffect(widthDp, heightDp, uiState.settings.useCenteredBentoCanvas) {
+            if (widthDp > 0f && heightDp > 0f) {
+                val newProfile = DesktopGridProfileResolver.resolve(
+                    screenWidthDp = widthDp,
+                    screenHeightDp = heightDp,
+                    useCenteredBentoCanvas = uiState.settings.useCenteredBentoCanvas
+                )
+                if (newProfile != uiState.gridProfile) {
+                    viewModel.updateGridProfile(newProfile)
+                }
+            }
+        }
+
+        WidgetDeckOverlayScreen(
+            uiState = uiState,
+            onDismissOverlay = onDismissOverlay,
+            onSelectPage = viewModel::selectPage,
+            onPreviousPage = viewModel::navigatePreviousPage,
+            onNextPage = viewModel::navigateNextPage,
+            onOpenWidgetPicker = viewModel::openWidgetPicker,
+            onCloseWidgetPicker = viewModel::closeWidgetPicker,
+            onSearchQueryChange = viewModel::updateWidgetSearchQuery,
+            onAddWidgetAutoPlace = viewModel::addWidgetAutoPlace,
+            onDragOutCatalogItem = { item, cellX, cellY ->
+                viewModel.dropCatalogWidgetAtCell(item, uiState.activePageIndex, cellX, cellY)
+            },
+            onOpenOverlaySettings = viewModel::openOverlaySettings,
+            onCloseOverlaySettings = viewModel::closeOverlaySettings,
+            onUpdateSettings = viewModel::updateSettings,
+            onStartEditPageLabel = viewModel::startEditingPageLabel,
+            onDraftChange = viewModel::updateEditingPageLabelDraft,
+            onCommitPageLabel = viewModel::commitPageLabel,
+            onCancelEditPageLabel = viewModel::cancelEditingPageLabel,
+            onEnterEditMode = viewModel::enterWidgetEditMode,
+            onExitEditMode = viewModel::exitWidgetEditMode,
+            onMoveWidget = { id, x, y ->
+                viewModel.moveWidget(id, x, y)
+            },
+            onResizeWidget = { id, x, y, sx, sy ->
+                viewModel.resizeWidget(id, x, y, sx, sy)
+            },
+            onStartWidgetDrag = viewModel::startWidgetDrag,
+            onWidgetHoverCellChanged = viewModel::onWidgetHoverCellChanged,
+            onCommitWidgetDrag = viewModel::commitWidgetDrag,
+            onCancelWidgetDrag = viewModel::cancelWidgetDrag,
+            onDragAcrossEdge = viewModel::dragWidgetAcrossEdge,
+            onRemoveWidget = viewModel::removeWidget,
+            onReconfigureWidget = { /* Handled by host activity/flow */ },
+            onOpenContextMenu = viewModel::openContextMenu,
+            onCloseContextMenu = viewModel::closeContextMenu,
+            modifier = Modifier.fillMaxSize(),
+            widgetContent = widgetContent
+        )
+    }
 }
 
 @Composable

@@ -931,6 +931,66 @@ class DeckViewModelTest {
         assertEquals(listOf(item2), filtered["AlphaApp"])
     }
 
+    // --- 12. Grid Profile Update & Reflow Tests ---
+
+    @Test
+    fun updateGridProfile_columnsGrow_existingWidgetsDoNotMove() = runTest(testDispatcher) {
+        val initialProfile = DesktopGridProfile(columns = 6, rows = 4)
+        viewModel.updateGridProfile(initialProfile)
+
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 3, cellY = 1, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        // Expand columns from 6 to 8
+        val expandedProfile = DesktopGridProfile(columns = 8, rows = 6)
+        viewModel.updateGridProfile(expandedProfile)
+
+        val widgetsAfter = viewModel.uiState.value.widgets
+        val resW1 = widgetsAfter.first { it.appWidgetId == 1 }
+        val resW2 = widgetsAfter.first { it.appWidgetId == 2 }
+
+        assertEquals(0, resW1.cellX)
+        assertEquals(0, resW1.cellY)
+        assertEquals(3, resW2.cellX)
+        assertEquals(1, resW2.cellY)
+        // Sizes re-synced via gateway
+        assertTrue(fakeGateway.updatedSizes.containsKey(1))
+        assertTrue(fakeGateway.updatedSizes.containsKey(2))
+    }
+
+    @Test
+    fun updateGridProfile_columnsShrink_outOfBoundsWidgetsReflowSensiblyWithoutOverlaps() = runTest(testDispatcher) {
+        val initialProfile = DesktopGridProfile(columns = 8, rows = 6)
+        viewModel.updateGridProfile(initialProfile)
+
+        // w1 at (0, 0, 2x2) fits in 4x4; w2 at (5, 0, 2x2) exceeds 4 columns!
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 5, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        // Shrink columns to 4x4
+        val shrunkProfile = DesktopGridProfile(columns = 4, rows = 4)
+        viewModel.updateGridProfile(shrunkProfile)
+
+        val widgetsAfter = viewModel.uiState.value.widgets
+        val resW1 = widgetsAfter.first { it.appWidgetId == 1 }
+        val resW2 = widgetsAfter.first { it.appWidgetId == 2 }
+
+        // w1 stayed at (0, 0)
+        assertEquals(0, resW1.cellX)
+        assertEquals(0, resW1.cellY)
+
+        // w2 was reflowed to a free spot on page 0 without overlapping w1
+        assertTrue(resW2.cellX + resW2.spanX <= shrunkProfile.columns)
+        assertTrue(resW2.cellY + resW2.spanY <= shrunkProfile.rows)
+        assertFalse(resW1.bounds.intersects(resW2.bounds))
+
+        // Sizes re-synced via gateway
+        assertTrue(fakeGateway.updatedSizes.containsKey(1))
+        assertTrue(fakeGateway.updatedSizes.containsKey(2))
+    }
+
     private fun createCatalogItem(pkg: String, label: String, spanX: Int, spanY: Int) = WidgetCatalogItem(
         providerPackage = pkg,
         providerClass = "$pkg.Widget",

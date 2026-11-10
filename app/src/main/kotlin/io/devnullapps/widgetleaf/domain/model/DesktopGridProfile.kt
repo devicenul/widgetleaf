@@ -6,7 +6,8 @@ data class DesktopGridProfile(
     val cellWidthDp: Float = 140f,
     val cellHeightDp: Float = 140f,
     val gutterDp: Float = 16f,
-    val marginDp: Float = 48f,
+    val marginDp: Float = 36f,
+    val topMarginDp: Float = marginDp,
     val maxCanvasWidthDp: Float = 1440f,
     val availableWidthDp: Float = 1440f,
     val availableHeightDp: Float = 900f

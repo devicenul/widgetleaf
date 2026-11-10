@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.devnullapps.widgetleaf.domain.model.DeckPage
 import io.devnullapps.widgetleaf.domain.model.DesktopGridProfile
+import io.devnullapps.widgetleaf.domain.model.GridBounds
 import io.devnullapps.widgetleaf.domain.model.OverlaySettings
 import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 import io.devnullapps.widgetleaf.domain.model.WidgetCatalogItem
@@ -979,11 +980,96 @@ class DeckViewModel(
     }
 
     fun updateGridProfile(profile: DesktopGridProfile) {
-        _uiState.update { it.copy(gridProfile = profile) }
+        val currentWidgets = _uiState.value.widgets
+        val currentPages = _uiState.value.pages
+
+        // Check if existing widgets need reflow (if columns or rows shrunk and any widget is out-of-bounds or overlapping)
+        val needsReflow = currentWidgets.any { w ->
+            w.cellX + w.spanX > profile.columns ||
+            w.cellY + w.spanY > profile.rows ||
+            w.spanX > profile.columns ||
+            w.spanY > profile.rows
+        }
+
+        val reflowedWidgets = if (needsReflow) {
+            reflowWidgetsToFitGrid(currentWidgets, currentPages, profile)
+        } else {
+            currentWidgets
+        }
+
+        val newPageCount = maxOf(currentPages.size, (reflowedWidgets.maxOfOrNull { it.pageIndex } ?: 0) + 1)
+        val reflowedPages = if (newPageCount > currentPages.size) {
+            val extended = currentPages.toMutableList()
+            for (p in currentPages.size until newPageCount) {
+                extended.add(DeckPage(pageIndex = p, customLabel = null))
+            }
+            extended
+        } else {
+            currentPages
+        }
+
+        _uiState.update { it.copy(gridProfile = profile, widgets = reflowedWidgets, pages = reflowedPages) }
         lastSyncedProfile = profile
-        for (w in _uiState.value.widgets) {
+        for (w in reflowedWidgets) {
             syncWidgetSizes(w, profile)
         }
+
+        if (needsReflow && reflowedWidgets != currentWidgets) {
+            viewModelScope.launch {
+                repository.replaceDeckState(pages = reflowedPages, widgets = reflowedWidgets)
+            }
+        }
+    }
+
+    private fun reflowWidgetsToFitGrid(
+        widgets: List<PlacedWidget>,
+        pages: List<DeckPage>,
+        profile: DesktopGridProfile
+    ): List<PlacedWidget> {
+        val settled = mutableListOf<PlacedWidget>()
+        val sortedWidgets = widgets.sortedWith(compareBy({ it.pageIndex }, { it.cellY }, { it.cellX }))
+
+        for (w in sortedWidgets) {
+            val clampedSpanX = w.spanX.coerceAtMost(profile.columns).coerceAtLeast(1)
+            val clampedSpanY = w.spanY.coerceAtMost(profile.rows).coerceAtLeast(1)
+
+            val candidateBounds = GridBounds(w.cellX, w.cellY, clampedSpanX, clampedSpanY)
+            val settledOnSamePage = settled.filter { it.pageIndex == w.pageIndex }
+            val fitsAtCurrent = candidateBounds.isWithin(profile.columns, profile.rows) &&
+                settledOnSamePage.none { it.bounds.intersects(candidateBounds) }
+
+            if (fitsAtCurrent) {
+                settled.add(w.copy(spanX = clampedSpanX, spanY = clampedSpanY))
+            } else {
+                var targetPage = w.pageIndex
+                var placed = false
+                while (!placed) {
+                    val settledOnTarget = settled.filter { it.pageIndex == targetPage }
+                    val spot = gridCollisionResolver.findFirstAvailableSpot(
+                        spanX = clampedSpanX,
+                        spanY = clampedSpanY,
+                        existingOnPage = settledOnTarget,
+                        columns = profile.columns,
+                        rows = profile.rows
+                    )
+                    if (spot != null) {
+                        settled.add(
+                            w.copy(
+                                pageIndex = targetPage,
+                                cellX = spot.first,
+                                cellY = spot.second,
+                                spanX = clampedSpanX,
+                                spanY = clampedSpanY
+                            )
+                        )
+                        placed = true
+                    } else {
+                        targetPage++
+                    }
+                }
+            }
+        }
+        return settled
     }
 
     fun refreshCatalog() {

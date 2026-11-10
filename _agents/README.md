@@ -12,7 +12,7 @@
 
 - **Ephemeral Flyleaf Overlay:** Triggered via the **Top Menu Bar leaf icon** (`WidgetLeafTopBarService`, configurable Left or Right position), **Global Hotkey** (default `Alt + W`, customizable in Overlay Settings), **Quick Settings tile** (`WidgetDeckTileService`), or **`ACTION_ASSIST`**.
 - **Full-Screen Frosted Glass Canvas:** Renders over the active desktop using hardware cross-window blur (`FLAG_BLUR_BEHIND`, `36dp`), dark scrim, ambient emerald radial glow, and `2%` procedural noise grain.
-- **Frameless Live Android Widgets:** Hosts real `AppWidgetHostView` instances (`DeckAppWidgetHostView`, host ID `1024`) on a responsive `8×8` / `6×6` desktop Bento snap grid (`DesktopGridProfileResolver`). Forces host view padding to zero (INV-13) and syncs multi-orientation sizes so responsive RemoteViews layouts match grid cell dimensions with zero fallback truncation.
+- **Frameless Live Android Widgets:** Hosts real `AppWidgetHostView` instances (`DeckAppWidgetHostView`, host ID `1024`) on a responsive desktop Bento snap grid (`DesktopGridProfileResolver`) spanning full width with mathematically symmetric margins (`INV-14`). Forces host view padding to zero (INV-13) and syncs multi-orientation sizes so responsive RemoteViews layouts match grid cell dimensions with zero fallback truncation.
 - **Desktop Pointer & Keyboard First:**
   - **Normal Mode:** Widgets are live and interactive. Clicking empty background or pressing `Escape` / any non-UI key (`Space`, letters, symbols) dismisses the overlay.
   - **Context Menu:** Right-clicking (`BUTTON_SECONDARY`), `Ctrl+Click`, two-finger clicking, or long-pressing the **empty canvas** opens the desktop context menu (`Widgets`, `Overlay Settings`).

@@ -142,7 +142,7 @@ fun WidgetGridPage(
                 (profile.marginDp + w.cellX * (profile.cellWidthDp + profile.gutterDp)).dp.toPx()
             }
             val topPx = with(density) {
-                (profile.marginDp + w.cellY * (profile.cellHeightDp + profile.gutterDp)).dp.toPx()
+                (profile.topMarginDp + w.cellY * (profile.cellHeightDp + profile.gutterDp)).dp.toPx()
             }
             val widthPx = with(density) { profile.widthDpForSpan(w.spanX).dp.toPx() }
             val heightPx = with(density) { profile.heightDpForSpan(w.spanY).dp.toPx() }
@@ -305,19 +305,10 @@ fun WidgetGridPage(
             }
         }
 
-        // Grid container, centered if useCenteredBentoCanvas == true
+        // Grid container
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(
-                    if (useCenteredBentoCanvas) {
-                        Modifier
-                            .widthIn(max = gridProfile.maxCanvasWidthDp.dp)
-                            .align(Alignment.Center)
-                    } else {
-                        Modifier
-                    }
-                )
                 .onGloballyPositioned { coords ->
                     gridOffsetInRoot = coords.positionInRoot().x
                 }
@@ -332,7 +323,7 @@ fun WidgetGridPage(
                 val dragged = currentWidgets.find { it.appWidgetId == draggingWidgetId }
                 if (dragged != null) {
                     val ghostLeftDp = (gridProfile.marginDp + hoveredCell.first * (gridProfile.cellWidthDp + gridProfile.gutterDp)).dp
-                    val ghostTopDp = (gridProfile.marginDp + hoveredCell.second * (gridProfile.cellHeightDp + gridProfile.gutterDp)).dp
+                    val ghostTopDp = (gridProfile.topMarginDp + hoveredCell.second * (gridProfile.cellHeightDp + gridProfile.gutterDp)).dp
                     val ghostWidthDp = gridProfile.widthDpForSpan(dragged.spanX).dp
                     val ghostHeightDp = gridProfile.heightDpForSpan(dragged.spanY).dp
 
@@ -385,7 +376,7 @@ fun WidgetGridPage(
                     val baseCellY = if (isCurrentlyDragged && dragStartCell != null) dragStartCell!!.second else widget.cellY
 
                     val targetLeftDp = (gridProfile.marginDp + baseCellX * (gridProfile.cellWidthDp + gridProfile.gutterDp)).dp
-                    val targetTopDp = (gridProfile.marginDp + baseCellY * (gridProfile.cellHeightDp + gridProfile.gutterDp)).dp
+                    val targetTopDp = (gridProfile.topMarginDp + baseCellY * (gridProfile.cellHeightDp + gridProfile.gutterDp)).dp
 
                     // Non-dragged widgets animate position changes with spring; dragged and just-dropped widgets snap
                     val shouldAnimate = !isFirstComposition && !isCurrentlyDragged && dragStartCell == null && !isJustDropped

@@ -101,3 +101,10 @@
   2. The `AndroidView` inside `HostedAppWidgetContent` must measure with exact constraints equal to the Bento grid cell box (`DesktopGridProfile.widthDpForSpan` / `heightDpForSpan`) without inner/outer padding or borders causing dp discrepancies. Reported dp == actual view dp.
   3. `DeckViewModel` MUST synchronize widget sizes via `syncWidgetSizes` on the FIRST `widgetsFlow` emission and in `onOverlayShown()`, and on subsequent emissions only when a widget is new, its span changed, or the grid profile changed, avoiding redundant gateway size calls.
 
+### INV-14: Grid Width Must Stretch Full-Width With Mathematically Symmetric Margins
+- **Why:** Hardcoding an artificial max canvas width cap or asymmetric margins causes the right side of the desktop canvas to become a dead zone where widgets cannot be dragged or placed, while left margins sit tightly against the screen edge. Furthermore, relying purely on display density or unadjusted window metrics can mismatch Compose layout on scaled displays.
+- **Rule:**
+  1. `DesktopGridProfileResolver` MUST stretch columns and cell width to use the full available width, computing symmetric horizontal margins as `(availableWidth - totalGridWidth) / 2f` so `leftMargin == rightMargin` exactly across all displays (portrait, 1024×640, 1280×800, 1920×1080, and ultrawide).
+  2. `WidgetDeckOverlayScreen` uses `BoxWithConstraints` to dynamically provide true Compose dp width/height to `updateGridProfile`.
+  3. `DeckViewModel.updateGridProfile` MUST keep existing widget positions stationary when columns grow, and clamp/reflow out-of-bounds widgets without overlaps when columns shrink, re-syncing responsive sizes for all widgets.
+

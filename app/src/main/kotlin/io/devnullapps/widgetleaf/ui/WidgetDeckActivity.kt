@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -318,6 +319,17 @@ class WidgetDeckActivity : ComponentActivity() {
         }
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::viewModel.isInitialized) {
+            val updatedProfile = container.gridProfileResolver.resolve(
+                context = this,
+                useCenteredBentoCanvas = viewModel.uiState.value.settings.useCenteredBentoCanvas
+            )
+            viewModel.updateGridProfile(updatedProfile)
+        }
+    }
+
     @Composable
     private fun HostedAppWidgetContent(placedWidget: PlacedWidget) {
         val uiState by viewModel.uiState.collectAsState()
@@ -491,23 +503,12 @@ class WidgetDeckActivity : ComponentActivity() {
         val state = viewModel.uiState.value
         val profile = state.gridProfile
         val density = resources.displayMetrics.density
-        val screenWidthDp = resources.configuration.screenWidthDp.toFloat()
-        val gridWidthDp = if (state.settings.useCenteredBentoCanvas) {
-            minOf(screenWidthDp, profile.maxCanvasWidthDp.toFloat())
-        } else {
-            screenWidthDp
-        }
-        val gridOffsetXDp = if (state.settings.useCenteredBentoCanvas && screenWidthDp > gridWidthDp) {
-            (screenWidthDp - gridWidthDp) / 2f
-        } else {
-            0f
-        }
-        val localXDp = (screenX / density) - gridOffsetXDp
+        val localXDp = screenX / density
         val localYDp = screenY / density
 
         return state.activePageWidgets.firstOrNull { w ->
             val leftDp = profile.marginDp + w.cellX * (profile.cellWidthDp + profile.gutterDp)
-            val topDp = profile.marginDp + w.cellY * (profile.cellHeightDp + profile.gutterDp)
+            val topDp = profile.topMarginDp + w.cellY * (profile.cellHeightDp + profile.gutterDp)
             val widthDp = profile.widthDpForSpan(w.spanX)
             val heightDp = profile.heightDpForSpan(w.spanY)
             localXDp >= leftDp &&
