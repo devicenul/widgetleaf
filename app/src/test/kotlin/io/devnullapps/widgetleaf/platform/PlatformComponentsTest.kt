@@ -200,6 +200,25 @@ class PlatformComponentsTest {
         assertThat(hostView.appWidgetId).isEqualTo(77)
     }
 
+    @Test
+    fun widgetDeckHostDetachesFromExistingParentOnCreateHostView() {
+        val host = WidgetDeckHost(context)
+        val hostView = host.createHostView(context, 88, null)
+        val parent1 = android.widget.FrameLayout(context)
+        parent1.addView(hostView)
+        assertThat(hostView.parent).isEqualTo(parent1)
+
+        // When createHostView is called again for the same id, it automatically detaches from parent1
+        val reusedView = host.createHostView(context, 88, null)
+        assertThat(reusedView).isSameInstanceAs(hostView)
+        assertThat(reusedView.parent).isNull()
+
+        // And can be added to parent2 without IllegalStateException
+        val parent2 = android.widget.FrameLayout(context)
+        parent2.addView(reusedView)
+        assertThat(reusedView.parent).isEqualTo(parent2)
+    }
+
     // --- AndroidWidgetHostGateway Tests ---
 
     @Test

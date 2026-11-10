@@ -19,6 +19,7 @@
   - **Widget Edit Mode:** Right-clicking, `Ctrl+Click`, two-finger clicking, or long-pressing a **widget** enters `EDIT_MODE` for that widget ONLY (suppressing the canvas context menu). Displays a centered `Reconfigure | Remove` pill inside the widget bounds, 4 centered perimeter resize handles with native desktop resize cursors (`↔` / `↕`) and live emerald outline preview (hit-testing restricted to the pill zone to prevent accidental resize hijacking), and interior drag-to-move with **Desktop-Style Cascade Displacement**:
     - **Cascade Displacement:** The dragged widget takes the target cell without altering its span; displaced widgets keep their dimensions and cascade in column-major order (downward first, then next column right, then next page top-left, auto-creating new pages if needed). Vacated space is freed.
     - **Live Preview:** After hovering over a target cell for 250ms, displaced widgets animate (spring slide) into their cascade positions. Hovering back to the original cell or cancelling reverts all widgets to the drag-start snapshot. Dropping commits and persists atomically.
+    - **In-Drag Edge Dwell Page Switching (INV-17):** Holding a dragged widget at the left/right screen edge for ~500ms flips pages mid-drag (repeating every 500ms while holding; leaving edge zone resets timer). Dragging right past the last page creates a speculative new page (shown on HUD via `uiState.effectivePages`); left dwell stops at Page 0. After flip, the dragged widget remains anchored under the pointer; live cascade preview runs on the new page. Dropping commits atomically and prunes empty/speculative pages; Escape/cancel reverts everything to drag-start snapshot and start page. Hoisted into `WidgetEditDragLayer` above `AnimatedContent` (INV-15) with single-parent host view safety (INV-16). Old drop-at-edge bump behavior is removed.
   - **Bottom Pagination Pill:** Circular page loop (`◄` / `►`), page pills (`1 .. N`) with inline right-click/long-press rename, `+` (Widget Picker), and `⚙` (Overlay Settings).
 
 ---
@@ -70,7 +71,7 @@
 │       │       ├── hostview/                    # WidgetDeckHost & DeckAppWidgetHostView
 │       │       ├── theme/                       # Color, Theme, MotionSpec
 │       │       └── components/                  # WidgetDeckOverlayScreen, WidgetGridPage,
-│       │                                        # GlassSurfaceBox (WidgetEditResizeFrame),
+│       │                                        # WidgetEditDragLayer, GlassSurfaceBox (WidgetEditResizeFrame),
 │       │                                        # BottomPaginationHud, DesktopContextMenu,
 │       │                                        # WidgetPickerBottomSheet, OverlaySettingsDialog
 │       └── test/kotlin/io/devnullapps/widgetleaf/ # Robolectric + Compose UI + Domain unit tests

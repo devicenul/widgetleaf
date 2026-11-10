@@ -295,6 +295,7 @@ class WidgetDeckActivity : ComponentActivity() {
                 onCommitWidgetDrag = viewModel::commitWidgetDrag,
                 onCancelWidgetDrag = viewModel::cancelWidgetDrag,
                 onDragAcrossEdge = viewModel::dragWidgetAcrossEdge,
+                onEdgeDwellTriggered = viewModel::onEdgeDwellTriggered,
                 onRemoveWidget = { id ->
                     lastWidgetMutationOrFlowUptimeMs = SystemClock.uptimeMillis()
                     viewModel.removeWidget(id)
@@ -355,6 +356,7 @@ class WidgetDeckActivity : ComponentActivity() {
                     appWidgetId = placedWidget.appWidgetId,
                     appWidget = providerInfo
                 ).apply {
+                    (parent as? ViewGroup)?.removeView(this)
                     setPadding(0, 0, 0, 0)
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -379,6 +381,12 @@ class WidgetDeckActivity : ComponentActivity() {
                         viewModel.removeWidget(id)
                     }
                 }
+            },
+            onReset = { hostView ->
+                (hostView.parent as? ViewGroup)?.removeView(hostView)
+            },
+            onRelease = { hostView ->
+                (hostView.parent as? ViewGroup)?.removeView(hostView)
             },
             update = { hostView ->
                 hostView.interactionMode = if (isEditing) {

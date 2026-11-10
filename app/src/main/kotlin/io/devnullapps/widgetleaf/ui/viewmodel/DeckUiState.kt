@@ -45,6 +45,7 @@ data class DeckUiState(
     val previewPageCount: Int? = null,
     val displacedWidgetIds: Set<Int> = emptySet(),
     val draggingWidgetId: Int? = null,
+    val dragStartPageIndex: Int? = null,
     val hoveredCell: Pair<Int, Int>? = null
 ) {
     val effectiveWidgets: List<PlacedWidget>

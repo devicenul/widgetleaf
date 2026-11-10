@@ -5,10 +5,14 @@ import android.appwidget.AppWidgetHostView
 import android.appwidget.AppWidgetProviderInfo
 import android.content.Context
 
+import android.view.ViewGroup
+
 open class WidgetDeckHost(
     context: Context,
     hostId: Int = DEFAULT_HOST_ID
 ) : AppWidgetHost(context, hostId) {
+
+    private val hostViewCache = mutableMapOf<Int, DeckAppWidgetHostView>()
 
     override fun onCreateView(
         context: Context,
@@ -23,7 +27,21 @@ open class WidgetDeckHost(
         appWidgetId: Int,
         appWidget: AppWidgetProviderInfo?
     ): DeckAppWidgetHostView {
-        return createView(context, appWidgetId, appWidget) as DeckAppWidgetHostView
+        val view = hostViewCache.getOrPut(appWidgetId) {
+            createView(context, appWidgetId, appWidget) as DeckAppWidgetHostView
+        }
+        (view.parent as? ViewGroup)?.removeView(view)
+        return view
+    }
+
+    override fun deleteAppWidgetId(appWidgetId: Int) {
+        hostViewCache.remove(appWidgetId)
+        super.deleteAppWidgetId(appWidgetId)
+    }
+
+    override fun clearViews() {
+        hostViewCache.clear()
+        super.clearViews()
     }
 
     companion object {

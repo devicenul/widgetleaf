@@ -48,22 +48,21 @@ Pure Kotlin models and deterministic use cases with zero Android UI dependencies
 ### 1.4 UI Layer (`ui/`)
 - **`WidgetDeckActivity`:** Single-instance translucent overlay activity. Hosts `WidgetDeckHost` (`AppWidgetHost`), handles the system `ACTION_APPWIDGET_BIND` and configuration result flows, applies window blur via `AndroidWindowBlurController`, and handles keyboard navigation (`Left`/`Right`/`PageUp`/`PageDown`, `1..9`/`0`, `Delete`, and `Escape` / any non-UI key to dismiss when no modal/editor is active).
 - **`DeckViewModel` & `DeckUiState`:** Manages overlay state and drag sessions.
-  - `startWidgetDrag(appWidgetId)`: Captures snapshot of all widgets and page count at drag start.
-  - `onWidgetHoverCellChanged(appWidgetId, cellX, cellY)`: 250ms debounced preview computation running `CascadeDisplacementResolver` against snapshot; immediately reverts if hovering back on start cell.
-  - `commitWidgetDrag(appWidgetId, cellX, cellY)`: Cancels debounce, immediately executes cascade resolution from snapshot, extends pages, and atomically persists via `repository.replaceDeckState`.
-  - `cancelWidgetDrag()`: Clears preview and reverts all positions.
+  - `startWidgetDrag(appWidgetId)`: Captures snapshot of all widgets, pages, start page, and start cell at drag start.
+  - `onEdgeDwellTriggered(direction)`: Handles 500 ms continuous edge dwell, advancing pages (LEFT stops at 0; RIGHT synthesizes speculative pages), updating `activePageIndex` and `previewPageCount`, and running cascade displacement on the new active page.
+  - `onWidgetHoverCellChanged(appWidgetId, cellX, cellY)`: 250ms debounced preview computation running `CascadeDisplacementResolver` on the active page against snapshot; immediately reverts if hovering back on start cell on start page.
+  - `commitWidgetDrag(appWidgetId, cellX, cellY)`: Cancels debounce, immediately executes cascade resolution on active page from snapshot, prunes unused speculative pages, and atomically persists via `repository.replaceDeckState`.
+  - `cancelWidgetDrag()`: Clears preview, restores start page and snapshot pages, and discards speculative pages.
   - Separates `moveWidget` (preserves all spans) from `resizeWidget` (updates bounds).
   - Exposes `effectiveWidgets` and `effectivePages` for UI rendering and pagination HUD.
   - Synchronizes widget sizes via `syncWidgetSizes` on first `widgetsFlow` emission, `onOverlayShown`, manual resize, and profile updates, deduping emissions against `lastSyncedWidgetSpans` to eliminate redundant gateway traffic.
-- **`DeckAppWidgetHostView`:** Custom `AppWidgetHostView` subclass:
+- **`WidgetDeckHost` & `DeckAppWidgetHostView`:** Custom `AppWidgetHost` and `AppWidgetHostView` subclass:
+  - **Single-Parent Enforcement & View Cache Safety (INV-16):** `WidgetDeckHost.createHostView` caches `DeckAppWidgetHostView` by `appWidgetId` and detaches from any parent ViewGroup (`(view.parent as? ViewGroup)?.removeView(view)`) before returning, preventing crashes when moving between grid and drag layer.
   - **Zero Padding Enforcement (INV-13):** Forces padding to 0 in `init`, `setPadding`, `setPaddingRelative`, and `setAppWidget` so API 31+ `RemoteViews.findBestFitLayout` available dimensions match reported sizes (`DesktopGridProfile.widthDpForSpan/heightDpForSpan`) exactly without fallback truncation.
   - `INTERACTIVE`: Standard widget click/scroll dispatch; intercepts secondary/Ctrl clicks and long-presses to enter `EDIT_MODE`.
   - `EDIT_MODE`: `dispatchTouchEvent` returns `false` so Compose owns 100% of pointer drag, resize, and button click events above the widget.
-- **`WidgetGridPage` & `WidgetEditResizeFrame` (`GlassSurfaceBox.kt`):**
-  - Renders frameless widgets on the Bento grid with `key(widget.appWidgetId)`.
-  - Non-dragged widgets animate position changes with spring physics (`PAGE_FLIP_SPRING_DAMPING`, `PAGE_FLIP_SPRING_STIFFNESS`); dragged widget uses `snap()` on drop.
-  - Anchors the dragged widget's static base offset at its drag-start cell throughout the drag (INV-2, INV-12).
-  - Renders a subtle emerald drop-target ghost outline at the hovered target cell during drag.
-  - Handles canvas-level vs. widget-level right-click / two-finger click / long-press detection.
-  - Uses a dedicated z-order hit overlay in edit mode (`testTag("placed_widget_$id")`) drawn above `AndroidView` to guarantee Move drags are never claimed or cancelled by remote view touch dispatch.
-  - Renders the emerald edit frame, centered `Reconfigure | Remove` action pill, and 4 centered perimeter resize handles (~64×20dp / 20×64dp hit area) with live resize preview and native desktop resize cursors (`TYPE_VERTICAL_DOUBLE_ARROW`, `TYPE_HORIZONTAL_DOUBLE_ARROW`, `TYPE_ALL_SCROLL`).
+- **`WidgetDeckOverlayScreen`, `WidgetEditDragLayer` & `WidgetGridPage`:**
+  - **Overlay Drag Layer (INV-15):** Hoists the active edit-mode move surface, resize frame, and live floating visual into `WidgetEditDragLayer` positioned strictly above `AnimatedContent`. Intra-drag page flips animate underneath without disposing the pointer coroutine or detaching the host view.
+  - **In-Drag Edge Dwell (INV-17):** Holding at the edge for 500 ms triggers mid-drag page flips, repeating every 500 ms while held; leaving the edge zone cancels the timer. Dropping commits on the newly active page with cascade; escape/cancel reverts to start page and snapshot. Old drop-at-edge bump behavior is removed.
+  - **`WidgetGridPage`:** Renders frameless non-editing widgets on the Bento grid with `key(widget.appWidgetId)` and spring physics (`PAGE_FLIP_SPRING_DAMPING`, `PAGE_FLIP_SPRING_STIFFNESS`). Skips rendering any widget currently in edit mode (`editingWidgetId`). Renders a subtle emerald drop-target ghost outline at `hoveredCell` on the active page.
+  - **`WidgetEditResizeFrame` (`GlassSurfaceBox.kt`):** Renders inside `WidgetEditDragLayer`, displaying the emerald edit frame, centered `Reconfigure | Remove` action pill, and 4 centered perimeter resize handles (~64×20dp / 20×64dp hit area) with live resize preview and native desktop resize cursors (`TYPE_VERTICAL_DOUBLE_ARROW`, `TYPE_HORIZONTAL_DOUBLE_ARROW`, `TYPE_ALL_SCROLL`).

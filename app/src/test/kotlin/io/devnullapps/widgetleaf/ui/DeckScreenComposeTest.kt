@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
@@ -515,7 +516,7 @@ class DeckScreenComposeTest {
 
         var movedCellY = -1
         var resizedSpanY = -1
-        var bumpedDirection: io.devnullapps.widgetleaf.domain.usecase.EdgeDirection? = null
+        var dwelledDirection: io.devnullapps.widgetleaf.domain.usecase.EdgeDirection? = null
         var currentEditingId by mutableStateOf<Int?>(null)
 
         composeTestRule.setContent {
@@ -543,8 +544,8 @@ class DeckScreenComposeTest {
                 onResizeWidget = { _, _, _, _, newSpanY ->
                     resizedSpanY = newSpanY
                 },
-                onDragAcrossEdge = { _, direction, _, _ ->
-                    bumpedDirection = direction
+                onEdgeDwellTriggered = { direction ->
+                    dwelledDirection = direction
                 },
                 onEnterEditMode = { id ->
                     currentEditingId = id
@@ -589,12 +590,25 @@ class DeckScreenComposeTest {
         composeTestRule.waitForIdle()
         assertThat(resizedSpanY).isGreaterThan(2)
 
-        // Drag widget body from cellX=6 to the right edge -> triggers EdgeDirection.RIGHT page bump
-        composeTestRule.onNodeWithTag("placed_widget_101").performTouchInput {
-            swipeRight(startX = centerX - 40f, endX = centerX + 260f, durationMillis = 200)
+        // Drag widget body to right edge: 300ms no dwell, 550ms triggers EdgeDirection.RIGHT
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            composeTestRule.onNodeWithTag("placed_widget_101").performTouchInput {
+                down(Offset(left + 40f, top + 40f))
+                moveBy(Offset(200f, 0f))
+            }
+            composeTestRule.mainClock.advanceTimeBy(300)
+            assertThat(dwelledDirection).isNull()
+
+            composeTestRule.mainClock.advanceTimeBy(250)
+            assertThat(dwelledDirection).isEqualTo(io.devnullapps.widgetleaf.domain.usecase.EdgeDirection.RIGHT)
+
+            composeTestRule.onNodeWithTag("placed_widget_101").performTouchInput {
+                up()
+            }
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
         }
-        composeTestRule.waitForIdle()
-        assertThat(bumpedDirection).isEqualTo(io.devnullapps.widgetleaf.domain.usecase.EdgeDirection.RIGHT)
     }
 
     @Test
@@ -1069,5 +1083,262 @@ class DeckScreenComposeTest {
         assertThat(host.paddingTop).isEqualTo(0)
         assertThat(host.paddingRight).isEqualTo(0)
         assertThat(host.paddingBottom).isEqualTo(0)
+    }
+
+    @Test
+    fun edgeDwell_repeatingEvery500ms_triggersMultipleFlips() {
+        val widget = PlacedWidget(
+            appWidgetId = 301,
+            providerPackage = "io.devnullapps.dwell",
+            providerClass = "DwellWidget",
+            pageIndex = 0,
+            cellX = 2,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2
+        )
+
+        var flipCount = 0
+
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = DeckUiState(
+                    widgets = listOf(widget),
+                    editingWidgetId = 301,
+                    draggingWidgetId = 301
+                ),
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                onEdgeDwellTriggered = {
+                    flipCount++
+                }
+            )
+        }
+
+        composeTestRule.waitForIdle()
+
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            composeTestRule.onNodeWithTag("placed_widget_301").performTouchInput {
+                down(Offset(left + 40f, top + 40f))
+                moveBy(Offset(1000f, 0f))
+            }
+
+            // At 550ms: first flip
+            composeTestRule.mainClock.advanceTimeBy(550)
+            assertThat(flipCount).isEqualTo(1)
+
+            // At 1050ms: second flip
+            composeTestRule.mainClock.advanceTimeBy(500)
+            assertThat(flipCount).isEqualTo(2)
+
+            // At 1550ms: third flip
+            composeTestRule.mainClock.advanceTimeBy(500)
+            assertThat(flipCount).isEqualTo(3)
+
+            composeTestRule.onNodeWithTag("placed_widget_301").performTouchInput {
+                up()
+            }
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test
+    fun edgeDwell_leavingEdgeZone_resetsDwellTimer() {
+        val widget = PlacedWidget(
+            appWidgetId = 302,
+            providerPackage = "io.devnullapps.dwell",
+            providerClass = "DwellWidget",
+            pageIndex = 0,
+            cellX = 2,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2
+        )
+
+        var flipCount = 0
+
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = DeckUiState(
+                    widgets = listOf(widget),
+                    editingWidgetId = 302,
+                    draggingWidgetId = 302
+                ),
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                onEdgeDwellTriggered = {
+                    flipCount++
+                }
+            )
+        }
+
+        composeTestRule.waitForIdle()
+
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            composeTestRule.onNodeWithTag("placed_widget_302").performTouchInput {
+                down(Offset(left + 40f, top + 40f))
+                moveBy(Offset(1000f, 0f))
+            }
+
+            // Hold for 300ms in edge zone (less than 500ms dwell threshold)
+            composeTestRule.mainClock.advanceTimeBy(300)
+            assertThat(flipCount).isEqualTo(0)
+
+            // Move back to center
+            composeTestRule.onNodeWithTag("placed_widget_302").performTouchInput {
+                moveBy(Offset(-800f, 0f))
+            }
+
+            // Hold for another 350ms in center
+            composeTestRule.mainClock.advanceTimeBy(350)
+            assertThat(flipCount).isEqualTo(0)
+
+            composeTestRule.onNodeWithTag("placed_widget_302").performTouchInput {
+                up()
+            }
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test
+    fun edgeDwell_leftEdgeAtPageZero_stopsDwell() {
+        val widget = PlacedWidget(
+            appWidgetId = 303,
+            providerPackage = "io.devnullapps.dwell",
+            providerClass = "DwellWidget",
+            pageIndex = 0,
+            cellX = 2,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2
+        )
+
+        var leftFlipCount = 0
+
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = DeckUiState(
+                    widgets = listOf(widget),
+                    editingWidgetId = 303,
+                    draggingWidgetId = 303,
+                    activePageIndex = 0
+                ),
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                onEdgeDwellTriggered = {
+                    if (it == io.devnullapps.widgetleaf.domain.usecase.EdgeDirection.LEFT) {
+                        leftFlipCount++
+                    }
+                }
+            )
+        }
+
+        composeTestRule.waitForIdle()
+
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            composeTestRule.onNodeWithTag("placed_widget_303").performTouchInput {
+                down(Offset(left + 40f, top + 40f))
+                moveBy(Offset(-600f, 0f))
+            }
+
+            // Hold at left edge while on page 0 for 1200ms -> should not flip
+            composeTestRule.mainClock.advanceTimeBy(1200)
+            assertThat(leftFlipCount).isEqualTo(0)
+
+            composeTestRule.onNodeWithTag("placed_widget_303").performTouchInput {
+                up()
+            }
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test
+    fun edgeDwell_speculativePage_displayedInHudAndPageSlider() {
+        val widget = PlacedWidget(
+            appWidgetId = 304,
+            providerPackage = "io.devnullapps.dwell",
+            providerClass = "DwellWidget",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2
+        )
+
+        // When dwelling right past page 0, previewPageCount = 2 synthesizes speculative Page 1
+        val stateWithSpeculativePage = DeckUiState(
+            pages = listOf(DeckPage(pageIndex = 0)),
+            widgets = listOf(widget),
+            activePageIndex = 1,
+            previewPageCount = 2,
+            editingWidgetId = 304,
+            draggingWidgetId = 304,
+            hoveredCell = Pair(0, 0)
+        )
+
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = stateWithSpeculativePage,
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> }
+            )
+        }
+
+        composeTestRule.waitForIdle()
+
+        // PageIndicatorHud shows speculative page pill 1
+        composeTestRule.onNodeWithTag("page_pill_1").assertIsDisplayed()
+        // Drop-target ghost outline is rendered at hoveredCell on active page 1
+        composeTestRule.onNodeWithTag("drag_ghost_outline").assertIsDisplayed()
     }
 }

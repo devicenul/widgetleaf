@@ -94,6 +94,7 @@ fun WidgetGridPage(
     editingWidgetId: Int?,
     useCenteredBentoCanvas: Boolean = true,
     draggingWidgetId: Int? = null,
+    draggedWidget: PlacedWidget? = null,
     hoveredCell: Pair<Int, Int>? = null,
     onStartWidgetDrag: (appWidgetId: Int) -> Unit = {},
     onWidgetHoverCellChanged: (appWidgetId: Int, cellX: Int, cellY: Int) -> Unit = { _, _, _ -> },
@@ -122,16 +123,6 @@ fun WidgetGridPage(
     val currentOnEnterEditMode by rememberUpdatedState(onEnterEditMode)
     val currentOnEmptyCanvasClick by rememberUpdatedState(onEmptyCanvasClick)
     val currentOnOpenContextMenu by rememberUpdatedState(onOpenContextMenu)
-    val currentOnStartWidgetDrag by rememberUpdatedState(onStartWidgetDrag)
-    val currentOnWidgetHoverCellChanged by rememberUpdatedState(onWidgetHoverCellChanged)
-    val currentOnCommitWidgetDrag by rememberUpdatedState(onCommitWidgetDrag ?: onMoveWidget)
-    val currentOnCancelWidgetDrag by rememberUpdatedState(onCancelWidgetDrag)
-
-    val movePointerIcon = rememberSystemPointerIcon(
-        context,
-        android.view.PointerIcon.TYPE_ALL_SCROLL,
-        PointerIcon.Hand
-    )
 
     fun findWidgetAtPosition(pos: Offset): PlacedWidget? {
         val profile = currentGridProfile
@@ -316,11 +307,9 @@ fun WidgetGridPage(
             val cellStepXPx = with(density) { (gridProfile.cellWidthDp + gridProfile.gutterDp).dp.toPx() }
             val cellStepYPx = with(density) { (gridProfile.cellHeightDp + gridProfile.gutterDp).dp.toPx() }
 
-            var justDroppedWidgetId by remember { mutableStateOf<Int?>(null) }
-
             // Subtle drop-target ghost outline at the hovered cell during widget drag
             if (draggingWidgetId != null && hoveredCell != null) {
-                val dragged = currentWidgets.find { it.appWidgetId == draggingWidgetId }
+                val dragged = draggedWidget ?: currentWidgets.find { it.appWidgetId == draggingWidgetId }
                 if (dragged != null) {
                     val ghostLeftDp = (gridProfile.marginDp + hoveredCell.first * (gridProfile.cellWidthDp + gridProfile.gutterDp)).dp
                     val ghostTopDp = (gridProfile.topMarginDp + hoveredCell.second * (gridProfile.cellHeightDp + gridProfile.gutterDp)).dp
@@ -346,43 +335,25 @@ fun WidgetGridPage(
             }
 
             widgets.forEach { widget ->
+                if (widget.appWidgetId == editingWidgetId) {
+                    return@forEach
+                }
                 key(widget.appWidgetId) {
-                    val isEditing = editingWidgetId == widget.appWidgetId
-                    val isCurrentlyDragged = draggingWidgetId == widget.appWidgetId
-
                     var isFirstComposition by remember(widget.appWidgetId) { mutableStateOf(true) }
                     SideEffect {
                         isFirstComposition = false
                     }
 
-                    val isJustDropped = justDroppedWidgetId == widget.appWidgetId
-                    LaunchedEffect(isJustDropped, widget.cellX, widget.cellY) {
-                        if (isJustDropped) {
-                            justDroppedWidgetId = null
-                        }
-                    }
-
-                    var moveDragX by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
-                    var moveDragY by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
-                    var dragStartCell by remember(widget.appWidgetId) { mutableStateOf<Pair<Int, Int>?>(null) }
-                    var lastHoverReportedCell by remember(widget.appWidgetId) { mutableStateOf<Pair<Int, Int>?>(null) }
-                    var lastDragPointerInWidgetX by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
-
                     val widthDp = gridProfile.widthDpForSpan(widget.spanX).dp
                     val heightDp = gridProfile.heightDpForSpan(widget.spanY).dp
 
-                    // DRAGGED widget static base offset must stay anchored at drag-start cell (INV-2)
-                    val baseCellX = if (isCurrentlyDragged && dragStartCell != null) dragStartCell!!.first else widget.cellX
-                    val baseCellY = if (isCurrentlyDragged && dragStartCell != null) dragStartCell!!.second else widget.cellY
+                    val targetLeftDp = (gridProfile.marginDp + widget.cellX * (gridProfile.cellWidthDp + gridProfile.gutterDp)).dp
+                    val targetTopDp = (gridProfile.topMarginDp + widget.cellY * (gridProfile.cellHeightDp + gridProfile.gutterDp)).dp
 
-                    val targetLeftDp = (gridProfile.marginDp + baseCellX * (gridProfile.cellWidthDp + gridProfile.gutterDp)).dp
-                    val targetTopDp = (gridProfile.topMarginDp + baseCellY * (gridProfile.cellHeightDp + gridProfile.gutterDp)).dp
-
-                    // Non-dragged widgets animate position changes with spring; dragged and just-dropped widgets snap
-                    val shouldAnimate = !isFirstComposition && !isCurrentlyDragged && dragStartCell == null && !isJustDropped
+                    // Non-dragged widgets animate position changes with spring physics
                     val animatedLeftDp by animateDpAsState(
                         targetValue = targetLeftDp,
-                        animationSpec = if (shouldAnimate) {
+                        animationSpec = if (!isFirstComposition) {
                             spring<Dp>(
                                 dampingRatio = MotionSpec.PAGE_FLIP_SPRING_DAMPING,
                                 stiffness = MotionSpec.PAGE_FLIP_SPRING_STIFFNESS
@@ -394,7 +365,7 @@ fun WidgetGridPage(
                     )
                     val animatedTopDp by animateDpAsState(
                         targetValue = targetTopDp,
-                        animationSpec = if (shouldAnimate) {
+                        animationSpec = if (!isFirstComposition) {
                             spring<Dp>(
                                 dampingRatio = MotionSpec.PAGE_FLIP_SPRING_DAMPING,
                                 stiffness = MotionSpec.PAGE_FLIP_SPRING_STIFFNESS
@@ -418,205 +389,42 @@ fun WidgetGridPage(
                         )
                     }
 
-                    val currentWidgetState by rememberUpdatedState(widget)
-                    val currentOnMoveWidget by rememberUpdatedState(onMoveWidget)
-                    val currentOnDragAcrossEdge by rememberUpdatedState(onDragAcrossEdge)
-
                     Box(
                         modifier = Modifier
                             .offset(x = animatedLeftDp, y = animatedTopDp)
                             .size(width = widthDp, height = heightDp)
                             .alpha(animatedAlpha.value)
-                            .then(
-                                if (!isEditing) {
-                                    Modifier
-                                        .testTag("placed_widget_${widget.appWidgetId}")
-                                        .pointerInput(widget.appWidgetId, false) {
-                                            awaitPointerEventScope {
-                                                while (true) {
-                                                    val event = awaitPointerEvent(PointerEventPass.Initial)
-                                                    val pressedCount = event.changes.count { it.pressed }
-                                                    if (event.type == PointerEventType.Press &&
-                                                        (event.buttons.isSecondaryPressed ||
-                                                            event.keyboardModifiers.isCtrlPressed ||
-                                                            pressedCount >= 2)
-                                                    ) {
-                                                        event.changes.forEach { it.consume() }
-                                                        lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                                                        onEnterEditMode(widget.appWidgetId)
-                                                        do {
-                                                            val next = awaitPointerEvent(PointerEventPass.Initial)
-                                                            next.changes.forEach { it.consume() }
-                                                        } while (next.changes.any { it.pressed })
-                                                    }
-                                                }
-                                            }
+                            .testTag("placed_widget_${widget.appWidgetId}")
+                            .pointerInput(widget.appWidgetId, false) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        val pressedCount = event.changes.count { it.pressed }
+                                        if (event.type == PointerEventType.Press &&
+                                            (event.buttons.isSecondaryPressed ||
+                                                event.keyboardModifiers.isCtrlPressed ||
+                                                pressedCount >= 2)
+                                        ) {
+                                            event.changes.forEach { it.consume() }
+                                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                            onEnterEditMode(widget.appWidgetId)
+                                            do {
+                                                val next = awaitPointerEvent(PointerEventPass.Initial)
+                                                next.changes.forEach { it.consume() }
+                                            } while (next.changes.any { it.pressed })
                                         }
-                                        .combinedClickable(
-                                            onClick = { /* Interactive widget click handled by host view */ },
-                                            onLongClick = {
-                                                lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                                                onEnterEditMode(widget.appWidgetId)
-                                            }
-                                        )
-                                } else {
-                                    Modifier
+                                    }
+                                }
+                            }
+                            .combinedClickable(
+                                onClick = { /* Interactive widget click handled by host view */ },
+                                onLongClick = {
+                                    lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                    onEnterEditMode(widget.appWidgetId)
                                 }
                             )
                     ) {
-                        // Layer 1 (Bottom): Visual widget content (AndroidView)
-                        // Translated by live drag offset so it glides smoothly during drag.
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .offset {
-                                    if (isEditing) {
-                                        IntOffset(moveDragX.roundToInt(), moveDragY.roundToInt())
-                                    } else {
-                                        IntOffset.Zero
-                                    }
-                                }
-                        ) {
-                            widgetContent(widget)
-                        }
-
-                        // Layer 2 (Top, if editing): Dedicated move-drag hit surface ABOVE widgetContent!
-                        // Positioned at static grid position (no dynamic offset), strictly satisfying INV-2.
-                        // Sits above AndroidView so AndroidView never receives events in edit mode.
-                        // Contains WidgetEditResizeFrame as a child so resize handles and action pill
-                        // move with live offset while Sibling 2 remains stationary.
-                        if (isEditing) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .testTag("placed_widget_${widget.appWidgetId}")
-                                    .pointerHoverIcon(movePointerIcon)
-                                    .pointerInput(widget.appWidgetId, true) {
-                                        detectDragGestures(
-                                            onDragStart = { startOffset ->
-                                                lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                                                val startX = currentWidgetState.cellX
-                                                val startY = currentWidgetState.cellY
-                                                dragStartCell = Pair(startX, startY)
-                                                lastHoverReportedCell = Pair(startX, startY)
-                                                moveDragX = 0f
-                                                moveDragY = 0f
-                                                lastDragPointerInWidgetX = startOffset.x
-                                                currentOnStartWidgetDrag(currentWidgetState.appWidgetId)
-                                            },
-                                            onDrag = { change, dragAmount ->
-                                                change.consume()
-                                                lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                                                moveDragX += dragAmount.x
-                                                moveDragY += dragAmount.y
-                                                lastDragPointerInWidgetX = change.position.x
-
-                                                val start = dragStartCell ?: Pair(currentWidgetState.cellX, currentWidgetState.cellY)
-                                                val prof = currentGridProfile
-                                                val stepXPx = with(density) { (prof.cellWidthDp + prof.gutterDp).dp.toPx() }
-                                                val stepYPx = with(density) { (prof.cellHeightDp + prof.gutterDp).dp.toPx() }
-                                                val cellDeltaX = (moveDragX / stepXPx).roundToInt()
-                                                val cellDeltaY = (moveDragY / stepYPx).roundToInt()
-                                                val currentHoverCellX = (start.first + cellDeltaX).coerceIn(0, (prof.columns - currentWidgetState.spanX).coerceAtLeast(0))
-                                                val currentHoverCellY = (start.second + cellDeltaY).coerceIn(0, (prof.rows - currentWidgetState.spanY).coerceAtLeast(0))
-                                                val currentHover = Pair(currentHoverCellX, currentHoverCellY)
-
-                                                if (currentHover != lastHoverReportedCell) {
-                                                    lastHoverReportedCell = currentHover
-                                                    currentOnWidgetHoverCellChanged(currentWidgetState.appWidgetId, currentHoverCellX, currentHoverCellY)
-                                                }
-                                            },
-                                            onDragCancel = {
-                                                justDroppedWidgetId = null
-                                                currentOnCancelWidgetDrag()
-                                                dragStartCell = null
-                                                lastHoverReportedCell = null
-                                                moveDragX = 0f
-                                                moveDragY = 0f
-                                            },
-                                            onDragEnd = {
-                                                lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                                                val w = currentWidgetState
-                                                val prof = currentGridProfile
-                                                val start = dragStartCell ?: Pair(w.cellX, w.cellY)
-                                                val stepXPx = with(density) { (prof.cellWidthDp + prof.gutterDp).dp.toPx() }
-                                                val stepYPx = with(density) { (prof.cellHeightDp + prof.gutterDp).dp.toPx() }
-                                                val cellDeltaX = (moveDragX / stepXPx).roundToInt()
-                                                val cellDeltaY = (moveDragY / stepYPx).roundToInt()
-                                                val targetCellX = (start.first + cellDeltaX).coerceIn(0, (prof.columns - w.spanX).coerceAtLeast(0))
-                                                val targetCellY = (start.second + cellDeltaY).coerceIn(0, (prof.rows - w.spanY).coerceAtLeast(0))
-
-                                                // Check edge drag thresholds (dragged past grid or screen edges)
-                                                val gridLeftPx = with(density) { prof.marginDp.dp.toPx() }
-                                                val gridRightPx = with(density) {
-                                                    (prof.marginDp + prof.widthDpForSpan(prof.columns)).dp.toPx()
-                                                }
-                                                val wLeftPx = with(density) {
-                                                    (prof.marginDp + start.first * (prof.cellWidthDp + prof.gutterDp)).dp.toPx()
-                                                }
-                                                val wWidthPx = with(density) { prof.widthDpForSpan(w.spanX).dp.toPx() }
-                                                val currentLeftPx = wLeftPx + moveDragX
-                                                val currentRightPx = currentLeftPx + wWidthPx
-                                                val pointerInRootX = gridOffsetInRoot + wLeftPx + lastDragPointerInWidgetX
-                                                val screenWidthPx = with(density) { prof.availableWidthDp.dp.toPx() }
-                                                val minHorizontalDragPx = with(density) { 32.dp.toPx() }
-                                                val edgeOvershootPx = with(density) { 20.dp.toPx() }
-                                                val screenEdgeZonePx = with(density) { 56.dp.toPx() }
-
-                                                val bumpedLeft = moveDragX < -minHorizontalDragPx &&
-                                                    (currentLeftPx < gridLeftPx - edgeOvershootPx || pointerInRootX < screenEdgeZonePx)
-                                                val bumpedRight = moveDragX > minHorizontalDragPx &&
-                                                    (currentRightPx > gridRightPx + edgeOvershootPx || pointerInRootX > screenWidthPx - screenEdgeZonePx)
-
-                                                if (bumpedLeft) {
-                                                    justDroppedWidgetId = null
-                                                    currentOnCancelWidgetDrag()
-                                                    val landingX = (prof.columns - w.spanX).coerceAtLeast(0)
-                                                    currentOnDragAcrossEdge(w.appWidgetId, EdgeDirection.LEFT, landingX, targetCellY)
-                                                } else if (bumpedRight) {
-                                                    justDroppedWidgetId = null
-                                                    currentOnCancelWidgetDrag()
-                                                    currentOnDragAcrossEdge(w.appWidgetId, EdgeDirection.RIGHT, 0, targetCellY)
-                                                } else {
-                                                    justDroppedWidgetId = w.appWidgetId
-                                                    currentOnCommitWidgetDrag(w.appWidgetId, targetCellX, targetCellY)
-                                                }
-
-                                                dragStartCell = null
-                                                lastHoverReportedCell = null
-                                                moveDragX = 0f
-                                                moveDragY = 0f
-                                            }
-                                        )
-                                    }
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .offset {
-                                            IntOffset(moveDragX.roundToInt(), moveDragY.roundToInt())
-                                        }
-                                ) {
-                                    WidgetEditResizeFrame(
-                                        widget = widget,
-                                        gridProfile = gridProfile,
-                                        isEditing = isEditing,
-                                        onResizeWidget = { newX, newY, newSpanX, newSpanY ->
-                                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                                            onResizeWidget(widget.appWidgetId, newX, newY, newSpanX, newSpanY)
-                                        },
-                                        onRemoveWidget = { id ->
-                                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                                            onRemoveWidget(id)
-                                        },
-                                        onReconfigureWidget = { id ->
-                                            lastWidgetActionTimeMs = SystemClock.uptimeMillis()
-                                            onReconfigureWidget?.invoke(id)
-                                        }
-                                    )
-                                }
-                            }
-                        }
+                        widgetContent(widget)
                     }
                 }
             }

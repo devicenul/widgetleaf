@@ -656,6 +656,124 @@ class DeckViewModelTest {
     }
 
     @Test
+    fun onEdgeDwellTriggered_right_advancesPageAndSynthesizesSpeculativePage() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setPages(listOf(DeckPage(0)))
+        fakeRepository.setWidgets(listOf(w1))
+
+        viewModel.startWidgetDrag(1)
+        assertEquals(0, viewModel.uiState.value.activePageIndex)
+        assertEquals(1, viewModel.uiState.value.effectivePageCount)
+
+        // Dwell right: advances to speculative page 1
+        viewModel.onEdgeDwellTriggered(EdgeDirection.RIGHT)
+        assertEquals(1, viewModel.uiState.value.activePageIndex)
+        assertEquals(2, viewModel.uiState.value.effectivePageCount)
+        assertEquals(2, viewModel.uiState.value.effectivePages.size)
+        // Persisted pages in repository untouched while dragging
+        assertEquals(1, fakeRepository.pages.size)
+    }
+
+    @Test
+    fun onEdgeDwellTriggered_left_atPageZero_isNoOp() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setPages(listOf(DeckPage(0)))
+        fakeRepository.setWidgets(listOf(w1))
+
+        viewModel.startWidgetDrag(1)
+        viewModel.onEdgeDwellTriggered(EdgeDirection.LEFT)
+
+        assertEquals(0, viewModel.uiState.value.activePageIndex)
+        assertEquals(1, viewModel.uiState.value.effectivePageCount)
+    }
+
+    @Test
+    fun commitWidgetDrag_afterEdgeDwell_prunesUnusedPagesAndPersistsContiguously() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setPages(listOf(DeckPage(0)))
+        fakeRepository.setWidgets(listOf(w1))
+
+        viewModel.startWidgetDrag(1)
+        // Dwell right past page 0 -> speculative page 1
+        viewModel.onEdgeDwellTriggered(EdgeDirection.RIGHT)
+        assertEquals(1, viewModel.uiState.value.activePageIndex)
+
+        // Dwell right again past page 1 -> speculative page 2
+        viewModel.onEdgeDwellTriggered(EdgeDirection.RIGHT)
+        assertEquals(2, viewModel.uiState.value.activePageIndex)
+
+        // Dwell left back to page 1
+        viewModel.onEdgeDwellTriggered(EdgeDirection.LEFT)
+        assertEquals(1, viewModel.uiState.value.activePageIndex)
+
+        // Drop on page 1 at (0, 0)
+        viewModel.commitWidgetDrag(1, cellX = 0, cellY = 0)
+
+        // Page 0 (now empty because w1 was only widget and moved to page 1) is pruned,
+        // and speculative page 2 is pruned! Page indices re-indexed contiguously.
+        val committedPages = viewModel.uiState.value.pages
+        val committedWidgets = viewModel.uiState.value.widgets
+        assertEquals(1, committedPages.size)
+        assertEquals(0, committedPages[0].pageIndex)
+        assertEquals(1, committedWidgets.size)
+        assertEquals(0, committedWidgets[0].pageIndex)
+        assertEquals(0, committedWidgets[0].cellX)
+        assertEquals(0, committedWidgets[0].cellY)
+        assertEquals(committedPages, fakeRepository.pages)
+        assertEquals(committedWidgets, fakeRepository.widgets)
+    }
+
+    @Test
+    fun cancelWidgetDrag_afterEdgeDwell_discardsSpeculativePagesAndRestoresStartPage() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setPages(listOf(DeckPage(0)))
+        fakeRepository.setWidgets(listOf(w1))
+
+        viewModel.startWidgetDrag(1)
+        viewModel.onEdgeDwellTriggered(EdgeDirection.RIGHT)
+        assertEquals(1, viewModel.uiState.value.activePageIndex)
+        assertEquals(2, viewModel.uiState.value.effectivePageCount)
+
+        viewModel.cancelWidgetDrag()
+        assertEquals(0, viewModel.uiState.value.activePageIndex)
+        assertEquals(1, viewModel.uiState.value.pages.size)
+        assertEquals(1, viewModel.uiState.value.effectivePageCount)
+        assertNull(viewModel.uiState.value.previewWidgets)
+        assertNull(viewModel.uiState.value.draggingWidgetId)
+    }
+
+    @Test
+    fun cascadeDisplacement_runsOnNewPageDuringDebouncedHover() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 1, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setPages(listOf(DeckPage(0), DeckPage(1)))
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        viewModel.startWidgetDrag(1)
+        // Flip to page 1
+        viewModel.onEdgeDwellTriggered(EdgeDirection.RIGHT)
+        assertEquals(1, viewModel.uiState.value.activePageIndex)
+
+        // Hover over (0, 0) on page 1 where w2 resides
+        viewModel.onWidgetHoverCellChanged(1, cellX = 0, cellY = 0)
+        advanceTimeBy(260)
+
+        val preview = viewModel.uiState.value.previewWidgets
+        assertNotNull(preview)
+        val previewW1 = preview!!.first { it.appWidgetId == 1 }
+        val previewW2 = preview.first { it.appWidgetId == 2 }
+
+        // w1 is at (0, 0) on page 1
+        assertEquals(1, previewW1.pageIndex)
+        assertEquals(0, previewW1.cellX)
+        assertEquals(0, previewW1.cellY)
+
+        // w2 was displaced downward on page 1 in column-major order
+        assertEquals(1, previewW2.pageIndex)
+        assertTrue(previewW2.cellY >= 2 || previewW2.cellX >= 2)
+    }
+
+    @Test
     fun resizeWidget_respectsMinSpan() = runTest {
         val widget = createWidget(id = 10, pageIndex = 0, cellX = 0, cellY = 0, spanX = 3, spanY = 3, minSpanX = 2, minSpanY = 2)
         fakeRepository.setWidgets(listOf(widget))

@@ -108,3 +108,23 @@
   2. `WidgetDeckOverlayScreen` uses `BoxWithConstraints` to dynamically provide true Compose dp width/height to `updateGridProfile`.
   3. `DeckViewModel.updateGridProfile` MUST keep existing widget positions stationary when columns grow, and reflow out-of-bounds widgets for display only when columns/rows shrink without writing to the repository, allowing original positions to restore when the grid expands; the persisted layout is modified only on explicit user commit (move, resize, drop, remove). Degenerate measurements (<= 10dp or 0) and unchanged profiles are ignored. Responsive sizes are re-synced for displayed widgets.
 
+### INV-15: Edit-Mode Drag Layer Must Sit Above `AnimatedContent`
+- **Why:** In Jetpack Compose, `AnimatedContent` disposes exiting page composable nodes and cancels all coroutines inside their `Modifier.pointerInput` scopes. If widget move drags and resize frames live inside page composables (`WidgetGridPage`), mid-drag page flips instantly abort the active pointer coroutine and cancel the drag.
+- **Rule:** The edit-mode move surface, resize frame, and dragged visual are hoisted into an un-animated sibling overlay (`WidgetEditDragLayer`) rendered in `WidgetDeckOverlayScreen` strictly above `AnimatedContent` (Layer 3.5). `WidgetGridPage` skips rendering any widget whose `appWidgetId == editingWidgetId`. Drag gestures remain rock-solid across page transitions, satisfying INV-2 and INV-12.
+
+### INV-16: Single-Parent Enforcement & View Cache Safety for `DeckAppWidgetHostView`
+- **Why:** An Android `View` can have at most one parent `ViewGroup`. When transitioning into/out of edit mode, the widget's `DeckAppWidgetHostView` moves between `WidgetGridPage` and `WidgetEditDragLayer`. If the host view is reused or cached, Compose factory composition timing can attempt to attach the view to a new parent before the old parent's disposal pass completes, throwing `IllegalStateException: The specified child already has a parent`.
+- **Rule:**
+  1. `WidgetDeckHost.createHostView` MUST cache `DeckAppWidgetHostView` by `appWidgetId` and explicitly detach the view from any existing parent (`(view.parent as? ViewGroup)?.removeView(view)`) before returning it.
+  2. `HostedAppWidgetContent` in `AndroidView` MUST ensure `(hostView.parent as? ViewGroup)?.removeView(hostView)` in `factory`, `onReset`, and `onRelease`.
+  3. `WidgetDeckHost` clears cached views on `deleteAppWidgetId` and `clearViews`.
+
+### INV-17: In-Drag Edge Dwell Page Switching Semantics
+- **Why:** Abruptly bumping a widget across pages on drop without visual feedback is jarring and prevents precise placement. Mid-drag edge dwell allows users to preview the destination page and its cascade displacement before committing.
+- **Rule:**
+  1. Holding a dragged widget at the screen/grid edge for 500 ms flips the active page mid-drag.
+  2. The dwell timer repeats every 500 ms if held continuously, and resets immediately upon leaving the edge zone. Minor micro-movements within the edge zone do not reset the timer.
+  3. Left dwell stops at Page 0; right dwell past the last page synthesizes speculative pages (shown in `PageIndicatorHud` via `uiState.effectivePages`).
+  4. During page flips, the dragged widget remains anchored under the pointer; live cascade preview (250 ms debounce) runs on the newly active page.
+  5. Dropping commits atomically via `CascadeDisplacementResolver` and prunes trailing empty/speculative pages. Cancelling (or `Escape`) reverts everything to the drag-start snapshot and restores the original page index. The old drop-at-edge bump path is removed.
+
