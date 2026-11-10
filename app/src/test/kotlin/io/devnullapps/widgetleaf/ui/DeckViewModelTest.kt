@@ -1502,6 +1502,135 @@ class DeckViewModelTest {
         assertTrue(fakeGateway.updatedSizes.isEmpty())
     }
 
+    @Test
+    fun addWidgetAutoPlace_shrunkProfile_preservesRawLayoutAndDoesNotOverlap() = runTest(testDispatcher) {
+        val initialProfile = DesktopGridProfile(columns = 8, rows = 6)
+        viewModel.updateGridProfile(initialProfile)
+
+        // w1 at (0,0) 2x2; w2 at (4,0) 4x2 on 8x6 grid
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 4, cellY = 0, spanX = 4, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+        fakeRepository.setPages(listOf(DeckPage(0)))
+
+        // Window shrinks (e.g. into freeform window)
+        val shrunkProfile = DesktopGridProfile(columns = 4, rows = 4)
+        viewModel.updateGridProfile(shrunkProfile)
+
+        // Add new 2x2 widget while shrunk profile is active
+        val newItem = createCatalogItem("com.new", "NewWidget", 2, 2)
+        viewModel.addWidgetAutoPlace(newItem)
+
+        // Ground-truth raw repository widgets must preserve w1 and w2 completely!
+        val rawWidgets = fakeRepository.widgets
+        val rawW1 = rawWidgets.first { it.appWidgetId == 1 }
+        val rawW2 = rawWidgets.first { it.appWidgetId == 2 }
+        val rawNew = rawWidgets.first { it.providerPackage == "com.new" }
+
+        // w1 unchanged
+        assertEquals(0, rawW1.pageIndex)
+        assertEquals(0, rawW1.cellX)
+        assertEquals(0, rawW1.cellY)
+        assertEquals(2, rawW1.spanX)
+        assertEquals(2, rawW1.spanY)
+
+        // w2 unchanged: NOT moved, span NOT shrunk!
+        assertEquals(0, rawW2.pageIndex)
+        assertEquals(4, rawW2.cellX)
+        assertEquals(0, rawW2.cellY)
+        assertEquals(4, rawW2.spanX)
+        assertEquals(2, rawW2.spanY)
+
+        // New widget placed in free spot on 8x6 grid without overlapping raw w1 or w2!
+        assertFalse(rawNew.bounds.intersects(rawW1.bounds))
+        assertFalse(rawNew.bounds.intersects(rawW2.bounds))
+
+        // Return to 8x6 fullscreen profile: all widgets display cleanly without overlap
+        viewModel.updateGridProfile(initialProfile)
+        val displayed = viewModel.uiState.value.widgets
+        val dispW1 = displayed.first { it.appWidgetId == 1 }
+        val dispW2 = displayed.first { it.appWidgetId == 2 }
+        val dispNew = displayed.first { it.providerPackage == "com.new" }
+        assertFalse(dispNew.bounds.intersects(dispW1.bounds))
+        assertFalse(dispNew.bounds.intersects(dispW2.bounds))
+    }
+
+    @Test
+    fun configureResult_shrunkProfile_preservesRawLayoutAndDoesNotOverlap() = runTest(testDispatcher) {
+        val initialProfile = DesktopGridProfile(columns = 8, rows = 6)
+        viewModel.updateGridProfile(initialProfile)
+
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 4, cellY = 0, spanX = 4, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+        fakeRepository.setPages(listOf(DeckPage(0)))
+
+        // Shrink profile
+        val shrunkProfile = DesktopGridProfile(columns = 4, rows = 4)
+        viewModel.updateGridProfile(shrunkProfile)
+
+        // Gateway requires configuration dialog
+        fakeGateway.hasConfig = true
+        val newItem = createCatalogItem("com.cfg", "ConfigWidget", 2, 2)
+        viewModel.addWidgetAutoPlace(newItem)
+
+        val pending = viewModel.uiState.value.pendingWidgetAction
+        assertTrue(pending is PendingWidgetAction.RequestConfigure)
+        val configAction = pending as PendingWidgetAction.RequestConfigure
+
+        // User finishes configuration successfully
+        viewModel.onConfigureWidgetResult(configAction.appWidgetId, resultOk = true)
+
+        // Assert raw repository
+        val rawWidgets = fakeRepository.widgets
+        val rawW1 = rawWidgets.first { it.appWidgetId == 1 }
+        val rawW2 = rawWidgets.first { it.appWidgetId == 2 }
+        val rawConfigured = rawWidgets.first { it.providerPackage == "com.cfg" }
+
+        // w1 and w2 untouched
+        assertEquals(0, rawW1.cellX)
+        assertEquals(0, rawW1.cellY)
+        assertEquals(2, rawW1.spanX)
+        assertEquals(4, rawW2.cellX)
+        assertEquals(0, rawW2.cellY)
+        assertEquals(4, rawW2.spanX)
+
+        // Configured widget does not overlap w1 or w2
+        assertFalse(rawConfigured.bounds.intersects(rawW1.bounds))
+        assertFalse(rawConfigured.bounds.intersects(rawW2.bounds))
+    }
+
+    @Test
+    fun dropCatalogWidgetAtCell_shrunkProfile_preservesRawLayout() = runTest(testDispatcher) {
+        val initialProfile = DesktopGridProfile(columns = 8, rows = 6)
+        viewModel.updateGridProfile(initialProfile)
+
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 4, cellY = 0, spanX = 4, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+        fakeRepository.setPages(listOf(DeckPage(0)))
+
+        // Shrink profile to 4x4
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 4, rows = 4))
+
+        val droppedItem = createCatalogItem("com.drop", "DropWidget", 2, 2)
+        viewModel.dropCatalogWidgetAtCell(droppedItem, pageIndex = 0, cellX = 2, cellY = 0)
+
+        val rawWidgets = fakeRepository.widgets
+        val rawW1 = rawWidgets.first { it.appWidgetId == 1 }
+        val rawW2 = rawWidgets.first { it.appWidgetId == 2 }
+        val rawDrop = rawWidgets.first { it.providerPackage == "com.drop" }
+
+        // w1 and w2 untouched
+        assertEquals(0, rawW1.cellX)
+        assertEquals(2, rawW1.spanX)
+        assertEquals(4, rawW2.cellX)
+        assertEquals(4, rawW2.spanX)
+
+        assertFalse(rawDrop.bounds.intersects(rawW1.bounds))
+        assertFalse(rawDrop.bounds.intersects(rawW2.bounds))
+    }
+
     private fun createCatalogItem(pkg: String, label: String, spanX: Int, spanY: Int) = WidgetCatalogItem(
         providerPackage = pkg,
         providerClass = "$pkg.Widget",

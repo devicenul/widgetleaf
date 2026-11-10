@@ -1,5 +1,7 @@
 package io.devnullapps.widgetleaf.domain.model
 
+import java.io.Serializable
+
 data class PlacedWidget(
     val appWidgetId: Int,
     val providerPackage: String,
@@ -16,7 +18,7 @@ data class PlacedWidget(
     val resizeMode: Int = RESIZE_BOTH,
     val isReconfigurable: Boolean = false,
     val label: String = ""
-) {
+) : Serializable {
     val bounds: GridBounds
         get() = GridBounds(cellX = cellX, cellY = cellY, spanX = spanX, spanY = spanY)
 
