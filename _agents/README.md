@@ -8,7 +8,7 @@
 
 ## 1. Mission & Functional Summary
 
-**WidgetLeaf** (`io.devnullapps.widgetleaf`, current version `v0.0.1`) is an on-demand, frosted-glass HUD and modular desktop widget overlay built for Android Desktop / Laptop environments ("Googlebook").
+**WidgetLeaf** (`io.devnullapps.widgetleaf`, current version `v0.0.2`) is an on-demand, frosted-glass HUD and modular desktop widget overlay built for Android Desktop / Laptop environments ("Googlebook").
 
 - **Ephemeral Flyleaf Overlay:** Triggered via the **Top Menu Bar leaf icon** (`WidgetLeafTopBarService`, configurable Left or Right position), **Global Hotkey** (default `Alt + W`, customizable in Overlay Settings), **Quick Settings tile** (`WidgetDeckTileService`), or **`ACTION_ASSIST`**.
 - **Full-Screen Frosted Glass Canvas:** Renders over the active desktop using hardware cross-window blur (`FLAG_BLUR_BEHIND`, `36dp`), dark scrim, ambient emerald radial glow, and `2%` procedural noise grain.
@@ -45,7 +45,7 @@
 │   ├── ARCHITECTURE.md              # Clean 4-layer architecture & desktop surface mechanics
 │   └── INVARIANTS.md                # Non-negotiable invariants & hard-won bug preventions
 ├── app/
-│   ├── build.gradle.kts             # Versioning (v0.0.1), signing, Room KSP, Compose, JaCoCo
+│   ├── build.gradle.kts             # Versioning (v0.0.2), signing, Room KSP, Compose, JaCoCo
 │   └── src/
 │       ├── main/kotlin/io/devnullapps/widgetleaf/
 │       │   ├── WidgetLeafApp.kt     # Application entrypoint & AppContainer owner
