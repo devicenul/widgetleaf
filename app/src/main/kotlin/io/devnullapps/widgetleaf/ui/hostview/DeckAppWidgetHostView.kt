@@ -1,6 +1,7 @@
 package io.devnullapps.widgetleaf.ui.hostview
 
 import android.appwidget.AppWidgetHostView
+import android.appwidget.AppWidgetProviderInfo
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
@@ -22,6 +23,23 @@ import android.widget.TextView
 import kotlin.math.abs
 
 open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) {
+
+    init {
+        super.setPadding(0, 0, 0, 0)
+    }
+
+    override fun setPadding(left: Int, top: Int, right: Int, bottom: Int) {
+        super.setPadding(0, 0, 0, 0)
+    }
+
+    override fun setPaddingRelative(start: Int, top: Int, end: Int, bottom: Int) {
+        super.setPaddingRelative(0, 0, 0, 0)
+    }
+
+    override fun setAppWidget(appWidgetId: Int, info: AppWidgetProviderInfo?) {
+        super.setAppWidget(appWidgetId, info)
+        super.setPadding(0, 0, 0, 0)
+    }
 
     enum class HostInteractionMode {
         INTERACTIVE,

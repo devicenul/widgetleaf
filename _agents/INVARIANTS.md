@@ -89,3 +89,15 @@
 ### INV-10: Detach `ComposeView` in Robolectric Activity Tests Before `destroy()`
 - **Why:** In Robolectric, destroying a `ComponentActivity` (`WidgetDeckActivityTest`) without detaching its `ComposeView` and idling the main looper can leave a stale `AndroidComposeView` registered in `ComposeRootRegistry`, causing subsequent `createComposeRule()` tests (`DeckScreenComposeTest`) in the same JVM to fail with `AppNotIdleException`.
 - **Rule:** Every test in `WidgetDeckActivityTest` must clean up via `tearDownController(controller)` (which calls `activity.setContentView(View(activity))` and `Shadows.shadowOf(Looper.getMainLooper()).idle()` before `controller.pause().stop().destroy()`).
+
+---
+
+## 5. Widget Host View & Responsive Sizing Invariants
+
+### INV-13: `DeckAppWidgetHostView` Padding Must Be Zero & Reported Sizes Must Match Actual Layout Bounds Exactly
+- **Why:** On Android API 31+ (Android 12+), `AppWidgetHostView.setAppWidget` applies framework default padding (`getDefaultPadding()`, ~8–16dp per edge) and computes the available RemoteViews layout size as `(measuredWidth - paddingLeft - paddingRight) / density`. If the host view retains framework default padding, `RemoteViews.findBestFitLayout` evaluates an available canvas smaller than the dimensions reported via `updateAppWidgetSizes` (`OPTION_APPWIDGET_SIZES`), causing responsive widgets (such as Google Weather forecast 4×3+) to determine that no responsive layout fits and fall back to `findSmallestRemoteView()`, truncating typography and content.
+- **Rule:**
+  1. `DeckAppWidgetHostView` MUST force padding to zero in `init`, override `setPadding` and `setPaddingRelative` to delegate strictly to `super.setPadding(0, 0, 0, 0)` / `super.setPaddingRelative(0, 0, 0, 0)`, and re-assert zero padding after `super.setAppWidget(...)`.
+  2. The `AndroidView` inside `HostedAppWidgetContent` must measure with exact constraints equal to the Bento grid cell box (`DesktopGridProfile.widthDpForSpan` / `heightDpForSpan`) without inner/outer padding or borders causing dp discrepancies. Reported dp == actual view dp.
+  3. `DeckViewModel` MUST synchronize widget sizes via `syncWidgetSizes` on the FIRST `widgetsFlow` emission and in `onOverlayShown()`, and on subsequent emissions only when a widget is new, its span changed, or the grid profile changed, avoiding redundant gateway size calls.
+

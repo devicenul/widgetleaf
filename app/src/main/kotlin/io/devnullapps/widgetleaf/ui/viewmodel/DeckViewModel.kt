@@ -47,6 +47,23 @@ class DeckViewModel(
     private var draggingWidgetStartCell: Pair<Int, Int>? = null
     private var dragSessionToken: Long = 0L
 
+    private var isFirstWidgetsEmission: Boolean = true
+    private var lastSyncedProfile: DesktopGridProfile? = null
+    private val lastSyncedWidgetSpans = mutableMapOf<Int, Pair<Int, Int>>()
+
+    private fun syncWidgetSizes(widget: PlacedWidget, profile: DesktopGridProfile) {
+        val sizes = calculateResponsiveSizesUseCase(widget.spanX, widget.spanY, profile)
+        widgetHostGateway.updateAppWidgetSizes(
+            appWidgetId = widget.appWidgetId,
+            sizesDp = sizes.responsiveSizes,
+            minWidthDp = sizes.minWidthDp,
+            minHeightDp = sizes.minHeightDp,
+            maxWidthDp = sizes.maxWidthDp,
+            maxHeightDp = sizes.maxHeightDp
+        )
+        lastSyncedWidgetSpans[widget.appWidgetId] = Pair(widget.spanX, widget.spanY)
+    }
+
     init {
         viewModelScope.launch {
             repository.pagesFlow.collect { pages ->
@@ -67,6 +84,31 @@ class DeckViewModel(
 
         viewModelScope.launch {
             repository.widgetsFlow.collect { widgets ->
+                val profile = _uiState.value.gridProfile
+                if (isFirstWidgetsEmission) {
+                    if (widgets.isNotEmpty()) {
+                        isFirstWidgetsEmission = false
+                    }
+                    lastSyncedProfile = profile
+                    for (w in widgets) {
+                        syncWidgetSizes(w, profile)
+                    }
+                } else {
+                    val profileChanged = profile != lastSyncedProfile
+                    for (w in widgets) {
+                        val previousSpan = lastSyncedWidgetSpans[w.appWidgetId]
+                        val isNew = previousSpan == null
+                        val spanChanged = previousSpan != Pair(w.spanX, w.spanY)
+                        if (profileChanged || isNew || spanChanged) {
+                            syncWidgetSizes(w, profile)
+                        }
+                    }
+                    val currentIds = widgets.map { it.appWidgetId }.toSet()
+                    lastSyncedWidgetSpans.keys.retainAll(currentIds)
+                    if (profileChanged) {
+                        lastSyncedProfile = profile
+                    }
+                }
                 _uiState.update { current ->
                     current.copy(widgets = widgets)
                 }
@@ -120,6 +162,11 @@ class DeckViewModel(
             if (refreshedWidgets != currentWidgets) {
                 repository.upsertWidgets(refreshedWidgets)
             }
+
+            for (w in refreshedWidgets) {
+                syncWidgetSizes(w, profile)
+            }
+            lastSyncedProfile = profile
 
             _uiState.update { current ->
                 current.copy(
@@ -435,15 +482,7 @@ class DeckViewModel(
         resolvedPageCount: Int? = null
     ) {
         val profile = _uiState.value.gridProfile
-        val sizes = calculateResponsiveSizesUseCase(candidate.spanX, candidate.spanY, profile)
-        widgetHostGateway.updateAppWidgetSizes(
-            appWidgetId = candidate.appWidgetId,
-            sizesDp = sizes.responsiveSizes,
-            minWidthDp = sizes.minWidthDp,
-            minHeightDp = sizes.minHeightDp,
-            maxWidthDp = sizes.maxWidthDp,
-            maxHeightDp = sizes.maxHeightDp
-        )
+        syncWidgetSizes(candidate, profile)
 
         val currentPages = _uiState.value.pages
         val targetPageIndex = candidate.pageIndex
@@ -756,15 +795,7 @@ class DeckViewModel(
             repository.replaceDeckState(newPages, result.widgets)
         }
 
-        val sizes = calculateResponsiveSizesUseCase(target.spanX, target.spanY, profile)
-        widgetHostGateway.updateAppWidgetSizes(
-            appWidgetId = target.appWidgetId,
-            sizesDp = sizes.responsiveSizes,
-            minWidthDp = sizes.minWidthDp,
-            minHeightDp = sizes.minHeightDp,
-            maxWidthDp = sizes.maxWidthDp,
-            maxHeightDp = sizes.maxHeightDp
-        )
+        syncWidgetSizes(target, profile)
     }
 
     fun dragWidgetAcrossEdge(
@@ -804,15 +835,7 @@ class DeckViewModel(
                 }
                 val transferred = result.widgets.find { it.appWidgetId == appWidgetId }
                 if (transferred != null) {
-                    val sizes = calculateResponsiveSizesUseCase(transferred.spanX, transferred.spanY, state.gridProfile)
-                    widgetHostGateway.updateAppWidgetSizes(
-                        appWidgetId = transferred.appWidgetId,
-                        sizesDp = sizes.responsiveSizes,
-                        minWidthDp = sizes.minWidthDp,
-                        minHeightDp = sizes.minHeightDp,
-                        maxWidthDp = sizes.maxWidthDp,
-                        maxHeightDp = sizes.maxHeightDp
-                    )
+                    syncWidgetSizes(transferred, state.gridProfile)
                 }
             }
             is EdgeTransferResult.BlockedAtLeftEdge -> {
@@ -827,6 +850,7 @@ class DeckViewModel(
 
     fun removeWidget(appWidgetId: Int) {
         cancelWidgetDrag()
+        lastSyncedWidgetSpans.remove(appWidgetId)
         widgetHostGateway.deleteAppWidgetId(appWidgetId)
         _uiState.update { current ->
             val remainingWidgets = current.widgets.filter { it.appWidgetId != appWidgetId }
@@ -956,16 +980,9 @@ class DeckViewModel(
 
     fun updateGridProfile(profile: DesktopGridProfile) {
         _uiState.update { it.copy(gridProfile = profile) }
+        lastSyncedProfile = profile
         for (w in _uiState.value.widgets) {
-            val sizes = calculateResponsiveSizesUseCase(w.spanX, w.spanY, profile)
-            widgetHostGateway.updateAppWidgetSizes(
-                appWidgetId = w.appWidgetId,
-                sizesDp = sizes.responsiveSizes,
-                minWidthDp = sizes.minWidthDp,
-                minHeightDp = sizes.minHeightDp,
-                maxWidthDp = sizes.maxWidthDp,
-                maxHeightDp = sizes.maxHeightDp
-            )
+            syncWidgetSizes(w, profile)
         }
     }
 

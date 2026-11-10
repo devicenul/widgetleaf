@@ -1,5 +1,6 @@
 package io.devnullapps.widgetleaf.ui
 
+import android.view.ViewGroup
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -25,11 +26,14 @@ import androidx.compose.ui.test.swipeUp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import io.devnullapps.widgetleaf.domain.model.DeckPage
+import io.devnullapps.widgetleaf.domain.model.DesktopGridProfile
 import io.devnullapps.widgetleaf.domain.model.OverlaySettings
 import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 import io.devnullapps.widgetleaf.domain.model.TopBarPosition
 import io.devnullapps.widgetleaf.domain.model.WidgetCatalogItem
+import io.devnullapps.widgetleaf.domain.usecase.CalculateResponsiveSizesUseCase
 import io.devnullapps.widgetleaf.ui.components.WidgetDeckOverlayScreen
+import io.devnullapps.widgetleaf.ui.hostview.DeckAppWidgetHostView
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckUiState
 import org.junit.Rule
 import org.junit.Test
@@ -993,5 +997,77 @@ class DeckScreenComposeTest {
                 assertThat(dynamicPalette.leafPrimary).isNotNull()
             }
         }
+    }
+
+    @Test
+    fun widgetAndroidView_layoutSizeEqualsReportedResponsiveSize() {
+        val widget = PlacedWidget(
+            appWidgetId = 42,
+            providerPackage = "com.google.android.apps.weather",
+            providerClass = "WeatherForecastWidgetProvider",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 3,
+            spanY = 2
+        )
+        val profile = DesktopGridProfile()
+        val state = DeckUiState(
+            pages = listOf(DeckPage(pageIndex = 0)),
+            widgets = listOf(widget),
+            gridProfile = profile
+        )
+        val calculateResponsiveSizesUseCase = CalculateResponsiveSizesUseCase()
+        val expectedSizeBundle = calculateResponsiveSizesUseCase(widget.spanX, widget.spanY, profile)
+
+        var capturedHostView: DeckAppWidgetHostView? = null
+
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = state,
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                widgetContent = { placed ->
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            DeckAppWidgetHostView(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                capturedHostView = this
+                            }
+                        }
+                    )
+                }
+            )
+        }
+
+        composeTestRule.waitForIdle()
+
+        assertThat(capturedHostView).isNotNull()
+        val host = capturedHostView!!
+        val density = host.context.resources.displayMetrics.density
+        val measuredWidthDp = host.width / density
+        val measuredHeightDp = host.height / density
+
+        assertThat(measuredWidthDp).isEqualTo(expectedSizeBundle.widthDp)
+        assertThat(measuredHeightDp).isEqualTo(expectedSizeBundle.heightDp)
+        assertThat(host.paddingLeft).isEqualTo(0)
+        assertThat(host.paddingTop).isEqualTo(0)
+        assertThat(host.paddingRight).isEqualTo(0)
+        assertThat(host.paddingBottom).isEqualTo(0)
     }
 }

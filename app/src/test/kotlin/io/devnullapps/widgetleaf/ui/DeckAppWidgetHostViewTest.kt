@@ -41,6 +41,49 @@ class DeckAppWidgetHostViewTest {
     }
 
     @Test
+    fun paddingIsZeroByDefault() {
+        assertThat(hostView.paddingLeft).isEqualTo(0)
+        assertThat(hostView.paddingTop).isEqualTo(0)
+        assertThat(hostView.paddingRight).isEqualTo(0)
+        assertThat(hostView.paddingBottom).isEqualTo(0)
+        assertThat(hostView.paddingStart).isEqualTo(0)
+        assertThat(hostView.paddingEnd).isEqualTo(0)
+    }
+
+    @Test
+    fun setPadding_forcesPaddingToZero() {
+        hostView.setPadding(16, 24, 32, 40)
+        assertThat(hostView.paddingLeft).isEqualTo(0)
+        assertThat(hostView.paddingTop).isEqualTo(0)
+        assertThat(hostView.paddingRight).isEqualTo(0)
+        assertThat(hostView.paddingBottom).isEqualTo(0)
+        assertThat(hostView.paddingStart).isEqualTo(0)
+        assertThat(hostView.paddingEnd).isEqualTo(0)
+    }
+
+    @Test
+    fun setPaddingRelative_forcesPaddingToZero() {
+        hostView.setPaddingRelative(16, 24, 32, 40)
+        assertThat(hostView.paddingLeft).isEqualTo(0)
+        assertThat(hostView.paddingTop).isEqualTo(0)
+        assertThat(hostView.paddingRight).isEqualTo(0)
+        assertThat(hostView.paddingBottom).isEqualTo(0)
+        assertThat(hostView.paddingStart).isEqualTo(0)
+        assertThat(hostView.paddingEnd).isEqualTo(0)
+    }
+
+    @Test
+    fun setAppWidget_preservesZeroPadding() {
+        hostView.setAppWidget(99, null)
+        assertThat(hostView.paddingLeft).isEqualTo(0)
+        assertThat(hostView.paddingTop).isEqualTo(0)
+        assertThat(hostView.paddingRight).isEqualTo(0)
+        assertThat(hostView.paddingBottom).isEqualTo(0)
+        assertThat(hostView.paddingStart).isEqualTo(0)
+        assertThat(hostView.paddingEnd).isEqualTo(0)
+    }
+
+    @Test
     fun secondaryButtonRightClickEntersEditModeAndFiresListener() {
         var enteredId = -1
         var rawX = 0f

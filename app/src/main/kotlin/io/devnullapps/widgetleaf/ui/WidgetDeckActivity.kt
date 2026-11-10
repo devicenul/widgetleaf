@@ -343,6 +343,7 @@ class WidgetDeckActivity : ComponentActivity() {
                     appWidgetId = placedWidget.appWidgetId,
                     appWidget = providerInfo
                 ).apply {
+                    setPadding(0, 0, 0, 0)
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT

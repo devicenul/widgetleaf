@@ -7,6 +7,7 @@ import io.devnullapps.widgetleaf.domain.model.OverlaySettings
 import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 import io.devnullapps.widgetleaf.domain.model.WidgetCatalogItem
 import io.devnullapps.widgetleaf.domain.repository.WidgetDeckRepository
+import io.devnullapps.widgetleaf.domain.usecase.CalculateResponsiveSizesUseCase
 import io.devnullapps.widgetleaf.domain.usecase.EdgeDirection
 import io.devnullapps.widgetleaf.domain.usecase.EdgePageDragTransferUseCase
 import io.devnullapps.widgetleaf.platform.ResponsiveWidgetSizeDp
@@ -363,6 +364,70 @@ class DeckViewModelTest {
 
         viewModel.exitWidgetEditMode()
         assertNull(viewModel.uiState.value.editingWidgetId)
+    }
+
+    @Test
+    fun widgetsFlow_syncsSizesOnInitialLoad() = runTest {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 3, spanY = 2)
+
+        fakeGateway.updateSizesCalls.clear()
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        val syncedIds = fakeGateway.updateSizesCalls.map { it.appWidgetId }
+        assertTrue(syncedIds.contains(1))
+        assertTrue(syncedIds.contains(2))
+        assertEquals(2, fakeGateway.updateSizesCalls.size)
+    }
+
+    @Test
+    fun widgetsFlow_notResentForUnchangedWidgetsOnSubsequentEmissions() = runTest {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1))
+
+        assertEquals(1, fakeGateway.updateSizesCalls.size)
+
+        // Emit exact same widget again
+        fakeRepository.setWidgets(listOf(w1))
+
+        // No new updateAppWidgetSizes call
+        assertEquals(1, fakeGateway.updateSizesCalls.size)
+    }
+
+    @Test
+    fun widgetsFlow_resentOnSpanChange() = runTest {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        assertEquals(2, fakeGateway.updateSizesCalls.size)
+
+        // Change span of w1, keep w2 unchanged
+        val w1Resized = w1.copy(spanX = 4, spanY = 3)
+        fakeRepository.setWidgets(listOf(w1Resized, w2))
+
+        // Only w1 was re-synced, w2 was not re-sent
+        assertEquals(3, fakeGateway.updateSizesCalls.size)
+        assertEquals(1, fakeGateway.updateSizesCalls.last().appWidgetId)
+        val lastCall = fakeGateway.updateSizesCalls.last()
+        val expected = CalculateResponsiveSizesUseCase()(4, 3, viewModel.uiState.value.gridProfile)
+        assertEquals(expected.responsiveSizes, lastCall.sizesDp)
+    }
+
+    @Test
+    fun onOverlayShown_syncsSizesForAllWidgets() = runTest {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 3, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        fakeGateway.updateSizesCalls.clear()
+
+        viewModel.onOverlayShown()
+
+        val syncedIds = fakeGateway.updateSizesCalls.map { it.appWidgetId }
+        assertTrue(syncedIds.contains(1))
+        assertTrue(syncedIds.contains(2))
+        assertEquals(2, fakeGateway.updateSizesCalls.size)
     }
 
     private fun createWidget(
@@ -967,6 +1032,7 @@ class DeckViewModelTest {
         var allocatedIds = listOf<Int>()
         var installedProviders = mutableSetOf<Pair<String, String>>()
         val updatedSizes = mutableMapOf<Int, List<ResponsiveWidgetSizeDp>>()
+        val updateSizesCalls = mutableListOf<UpdateSizesCall>()
 
         override fun startListening() {}
         override fun stopListening() {}
@@ -1004,6 +1070,18 @@ class DeckViewModelTest {
             maxHeightDp: Int
         ) {
             updatedSizes[appWidgetId] = sizesDp
+            updateSizesCalls.add(
+                UpdateSizesCall(appWidgetId, sizesDp, minWidthDp, minHeightDp, maxWidthDp, maxHeightDp)
+            )
         }
     }
+
+    data class UpdateSizesCall(
+        val appWidgetId: Int,
+        val sizesDp: List<ResponsiveWidgetSizeDp>,
+        val minWidthDp: Int,
+        val minHeightDp: Int,
+        val maxWidthDp: Int,
+        val maxHeightDp: Int
+    )
 }

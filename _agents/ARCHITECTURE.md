@@ -54,7 +54,9 @@ Pure Kotlin models and deterministic use cases with zero Android UI dependencies
   - `cancelWidgetDrag()`: Clears preview and reverts all positions.
   - Separates `moveWidget` (preserves all spans) from `resizeWidget` (updates bounds).
   - Exposes `effectiveWidgets` and `effectivePages` for UI rendering and pagination HUD.
-- **`DeckAppWidgetHostView`:** Custom `AppWidgetHostView` subclass with two modes:
+  - Synchronizes widget sizes via `syncWidgetSizes` on first `widgetsFlow` emission, `onOverlayShown`, manual resize, and profile updates, deduping emissions against `lastSyncedWidgetSpans` to eliminate redundant gateway traffic.
+- **`DeckAppWidgetHostView`:** Custom `AppWidgetHostView` subclass:
+  - **Zero Padding Enforcement (INV-13):** Forces padding to 0 in `init`, `setPadding`, `setPaddingRelative`, and `setAppWidget` so API 31+ `RemoteViews.findBestFitLayout` available dimensions match reported sizes (`DesktopGridProfile.widthDpForSpan/heightDpForSpan`) exactly without fallback truncation.
   - `INTERACTIVE`: Standard widget click/scroll dispatch; intercepts secondary/Ctrl clicks and long-presses to enter `EDIT_MODE`.
   - `EDIT_MODE`: `dispatchTouchEvent` returns `false` so Compose owns 100% of pointer drag, resize, and button click events above the widget.
 - **`WidgetGridPage` & `WidgetEditResizeFrame` (`GlassSurfaceBox.kt`):**
