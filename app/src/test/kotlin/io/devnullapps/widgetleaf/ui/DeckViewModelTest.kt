@@ -82,6 +82,42 @@ class DeckViewModelTest {
     }
 
     @Test
+    fun swipeNavigation_nonWrappingAndBoundsEnforced() = runTest {
+        val pages = listOf(DeckPage(0), DeckPage(1), DeckPage(2))
+        fakeRepository.setPages(pages)
+
+        assertEquals(0, viewModel.uiState.value.activePageIndex)
+
+        // Swiping previous from Page 0 must NOT wrap around to Page 2
+        val prevResultFromZero = viewModel.swipePreviousPage()
+        assertFalse(prevResultFromZero)
+        assertEquals(0, viewModel.uiState.value.activePageIndex)
+
+        // Swiping next from Page 0 steps to Page 1
+        val nextResult1 = viewModel.swipeNextPage()
+        assertTrue(nextResult1)
+        assertEquals(1, viewModel.uiState.value.activePageIndex)
+        assertEquals(1, fakeRepository.settings.lastViewedPageIndex)
+
+        // Swiping next from Page 1 steps to Page 2
+        val nextResult2 = viewModel.swipeNextPage()
+        assertTrue(nextResult2)
+        assertEquals(2, viewModel.uiState.value.activePageIndex)
+        assertEquals(2, fakeRepository.settings.lastViewedPageIndex)
+
+        // Swiping next from last page (Page 2) must NOT wrap around or create speculative pages
+        val nextResultFromLast = viewModel.swipeNextPage()
+        assertFalse(nextResultFromLast)
+        assertEquals(2, viewModel.uiState.value.activePageIndex)
+        assertEquals(3, viewModel.uiState.value.pages.size)
+
+        // Swiping previous from Page 2 steps back to Page 1
+        val prevResult2 = viewModel.swipePreviousPage()
+        assertTrue(prevResult2)
+        assertEquals(1, viewModel.uiState.value.activePageIndex)
+    }
+
+    @Test
     fun circularNavigation_singlePage_doesNotLoop() = runTest {
         val pages = listOf(DeckPage(0))
         fakeRepository.setPages(pages)

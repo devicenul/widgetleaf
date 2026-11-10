@@ -12,6 +12,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +31,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import io.devnullapps.widgetleaf.domain.model.OverlaySettings
@@ -40,6 +46,7 @@ import io.devnullapps.widgetleaf.ui.theme.MotionSpec
 import io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckUiState
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckViewModel
+import kotlin.math.abs
 
 /**
  * Full-screen root composable for the WidgetLeaf frameless multi-page overlay:
@@ -54,6 +61,8 @@ fun WidgetDeckOverlayScreen(
     viewModel: DeckViewModel,
     onDismissOverlay: () -> Unit,
     modifier: Modifier = Modifier,
+    canWidgetScroll: (x: Float, y: Float, dirX: Int, dirY: Int) -> Boolean = { _, _, _, _ -> false },
+    onCancelChildTouches: (x: Float, y: Float) -> Unit = { _, _ -> },
     widgetContent: @Composable (PlacedWidget) -> Unit = { DefaultFramelessWidgetContent(it) }
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -83,6 +92,10 @@ fun WidgetDeckOverlayScreen(
             onSelectPage = viewModel::selectPage,
             onPreviousPage = viewModel::navigatePreviousPage,
             onNextPage = viewModel::navigateNextPage,
+            onSwipePrevious = viewModel::swipePreviousPage,
+            onSwipeNext = viewModel::swipeNextPage,
+            canWidgetScroll = canWidgetScroll,
+            onCancelChildTouches = onCancelChildTouches,
             onOpenWidgetPicker = viewModel::openWidgetPicker,
             onCloseWidgetPicker = viewModel::closeWidgetPicker,
             onSearchQueryChange = viewModel::updateWidgetSearchQuery,
@@ -128,6 +141,10 @@ fun WidgetDeckOverlayScreen(
     onSelectPage: (pageIndex: Int) -> Unit,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
+    onSwipePrevious: () -> Unit = onPreviousPage,
+    onSwipeNext: () -> Unit = onNextPage,
+    canWidgetScroll: (x: Float, y: Float, dirX: Int, dirY: Int) -> Boolean = { _, _, _, _ -> false },
+    onCancelChildTouches: (x: Float, y: Float) -> Unit = { _, _ -> },
     onOpenWidgetPicker: () -> Unit,
     onCloseWidgetPicker: () -> Unit,
     onSearchQueryChange: (query: String) -> Unit,
@@ -162,10 +179,23 @@ fun WidgetDeckOverlayScreen(
         var lastContextMenuOpenUptimeMs by remember { mutableLongStateOf(-10_000L) }
         var lastWidgetMutationUptimeMs by remember { mutableLongStateOf(-10_000L) }
 
+        val isSwipeGesturesEnabled = uiState.editingWidgetId == null &&
+            !uiState.isWidgetPickerOpen &&
+            !uiState.isOverlaySettingsOpen &&
+            uiState.contextMenuPosition == null
+
         Box(
             modifier = modifier
                 .fillMaxSize()
                 .testTag("widget_deck_overlay_root")
+                .overlaySwipeGestures(
+                    enabled = isSwipeGesturesEnabled,
+                    canWidgetScroll = canWidgetScroll,
+                    onCancelChildTouches = onCancelChildTouches,
+                    onSwipeNext = onSwipeNext,
+                    onSwipePrevious = onSwipePrevious,
+                    onDismiss = onDismissOverlay
+                )
         ) {
             // LAYER 1: Optical Frost Scrim & 2% Procedural Noise Grain
             val effectiveScrimAlpha = uiState.settings.scrimAlpha
@@ -413,6 +443,145 @@ fun WidgetDeckOverlayScreen(
                 onUpdateSettings = onUpdateSettings,
                 onDismissRequest = onCloseOverlaySettings
             )
+        }
+    }
+}
+
+private enum class SwipeDirection {
+    HORIZONTAL,
+    VERTICAL
+}
+
+/**
+ * Intercepts 1-finger touch gestures at the overlay root in [PointerEventPass.Initial].
+ *
+ * Mechanics:
+ * - If [enabled] is false (e.g. widget edit mode or open dialogs), touch streams pass through unaltered.
+ * - Filters for [PointerType.Touch] (single-finger touchscreen swipe).
+ * - Dominant-axis locking: requires 1.2x ratio between X/Y deltas to prevent diagonal jitter.
+ * - Widget scrollability awareness: queries [canWidgetScroll]. If a child widget can scroll in the gesture
+ *   direction, the swipe is not claimed, allowing widget lists/carousels to scroll normally.
+ * - Once claimed, consumes pointer events in Initial pass and invokes [onCancelChildTouches] on the target widget.
+ * - Distance & velocity thresholds:
+ *   - Swipe Left (negative dx) -> [onSwipeNext]
+ *   - Swipe Right (positive dx) -> [onSwipePrevious]
+ *   - Swipe Up or Down (vertical dy) -> [onDismiss]
+ */
+internal fun Modifier.overlaySwipeGestures(
+    enabled: Boolean,
+    canWidgetScroll: (x: Float, y: Float, dirX: Int, dirY: Int) -> Boolean,
+    onCancelChildTouches: (x: Float, y: Float) -> Unit,
+    onSwipeNext: () -> Unit,
+    onSwipePrevious: () -> Unit,
+    onDismiss: () -> Unit
+): Modifier = pointerInput(enabled) {
+    if (!enabled) return@pointerInput
+
+    val touchSlop = viewConfiguration.touchSlop
+    val density = this
+
+    awaitEachGesture {
+        val down = awaitFirstDown(pass = PointerEventPass.Initial, requireUnconsumed = false)
+        if (down.type != PointerType.Touch) {
+            return@awaitEachGesture
+        }
+
+        val downPos = down.position
+        var currentPos = downPos
+        var gestureClaimed = false
+        var gestureDirection: SwipeDirection? = null
+        var actionTriggered = false
+        val velocityTracker = VelocityTracker()
+        velocityTracker.addPosition(down.uptimeMillis, downPos)
+
+        val pageThresholdPx = with(density) { 56.dp.toPx() }
+        val dismissThresholdPx = with(density) { 80.dp.toPx() }
+
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+
+            if (!change.pressed) {
+                currentPos = change.position
+                velocityTracker.addPosition(change.uptimeMillis, currentPos)
+                break
+            }
+
+            currentPos = change.position
+            velocityTracker.addPosition(change.uptimeMillis, currentPos)
+
+            val totalDx = currentPos.x - downPos.x
+            val totalDy = currentPos.y - downPos.y
+            val distSq = totalDx * totalDx + totalDy * totalDy
+
+            if (!gestureClaimed && !actionTriggered) {
+                if (distSq > touchSlop * touchSlop) {
+                    val absDx = abs(totalDx)
+                    val absDy = abs(totalDy)
+
+                    if (absDx > absDy * 1.2f) {
+                        val dirX = if (totalDx < 0) 1 else -1
+                        val widgetCanScroll = canWidgetScroll(downPos.x, downPos.y, dirX, 0)
+                        if (!widgetCanScroll) {
+                            gestureClaimed = true
+                            gestureDirection = SwipeDirection.HORIZONTAL
+                            onCancelChildTouches(downPos.x, downPos.y)
+                        }
+                    } else if (absDy > absDx * 1.2f) {
+                        val dirY = if (totalDy < 0) 1 else -1
+                        val widgetCanScroll = canWidgetScroll(downPos.x, downPos.y, 0, dirY)
+                        if (!widgetCanScroll) {
+                            gestureClaimed = true
+                            gestureDirection = SwipeDirection.VERTICAL
+                            onCancelChildTouches(downPos.x, downPos.y)
+                        }
+                    }
+                }
+            }
+
+            if (gestureClaimed) {
+                change.consume()
+
+                // Trigger immediately if dragged past the full threshold during continuous touch
+                if (!actionTriggered) {
+                    if (gestureDirection == SwipeDirection.HORIZONTAL) {
+                        if (totalDx <= -pageThresholdPx) {
+                            actionTriggered = true
+                            onSwipeNext()
+                        } else if (totalDx >= pageThresholdPx) {
+                            actionTriggered = true
+                            onSwipePrevious()
+                        }
+                    } else if (gestureDirection == SwipeDirection.VERTICAL) {
+                        if (abs(totalDy) >= dismissThresholdPx) {
+                            actionTriggered = true
+                            onDismiss()
+                        }
+                    }
+                }
+            }
+        }
+
+        // On pointer release (UP): evaluate velocity flick if claimed and not yet fired
+        if (gestureClaimed && !actionTriggered) {
+            val velocity = velocityTracker.calculateVelocity()
+            val totalDx = currentPos.x - downPos.x
+            val totalDy = currentPos.y - downPos.y
+            val minFlickDist = touchSlop * 2f
+
+            if (gestureDirection == SwipeDirection.HORIZONTAL) {
+                if ((totalDx < -minFlickDist && velocity.x < -600f) || totalDx <= -pageThresholdPx) {
+                    onSwipeNext()
+                } else if ((totalDx > minFlickDist && velocity.x > 600f) || totalDx >= pageThresholdPx) {
+                    onSwipePrevious()
+                }
+            } else if (gestureDirection == SwipeDirection.VERTICAL) {
+                if ((abs(totalDy) > minFlickDist && abs(velocity.y) > 600f) ||
+                    abs(totalDy) >= dismissThresholdPx
+                ) {
+                    onDismiss()
+                }
+            }
         }
     }
 }

@@ -286,9 +286,6 @@ class DeckAppWidgetHostViewTest {
 
     @Test
     fun genericMotionScrollDelegatesToScrollableChild() {
-        var horizontalScrollDelta: Float? = null
-        hostView.onHorizontalPageScrollListener = { delta -> horizontalScrollDelta = delta }
-
         val listView = ListView(context)
         hostView.addView(listView)
 
@@ -297,14 +294,10 @@ class DeckAppWidgetHostViewTest {
         scrollEvent.recycle()
 
         assertThat(handled).isTrue()
-        assertThat(horizontalScrollDelta).isNull()
     }
 
     @Test
-    fun genericMotionScrollRoutesToHorizontalPagerWhenNoScrollableChild() {
-        var horizontalScrollDelta: Float? = null
-        hostView.onHorizontalPageScrollListener = { delta -> horizontalScrollDelta = delta }
-
+    fun regularMouseWheelDoesNotPageWhenNoScrollableChild() {
         // HostView with only a static TextView child
         val textView = TextView(context).apply { text = "Static widget" }
         hostView.addView(textView)
@@ -313,21 +306,50 @@ class DeckAppWidgetHostViewTest {
         val handled = hostView.dispatchGenericMotionEvent(scrollEvent)
         scrollEvent.recycle()
 
+        // Regular mouse wheel must be consumed without paging
         assertThat(handled).isTrue()
-        assertThat(horizontalScrollDelta).isEqualTo(3.5f)
     }
 
     @Test
-    fun genericMotionHorizontalScrollRoutesToPageScrollListener() {
-        var horizontalScrollDelta: Float? = null
-        hostView.onHorizontalPageScrollListener = { delta -> horizontalScrollDelta = delta }
+    fun trackpadScrollDelegatesToScrollableChildOrPermitsParentHandling() {
+        val listView = ListView(context)
+        hostView.addView(listView)
 
-        val scrollEvent = createScrollEvent(vScroll = 0f, hScroll = -4.0f)
-        val handled = hostView.dispatchGenericMotionEvent(scrollEvent)
-        scrollEvent.recycle()
+        // Trackpad scroll over scrollable child: host view delegates to child and returns true
+        val trackpadScrollOnList = createTrackpadScrollEvent(vScroll = 2.0f, hScroll = 0f)
+        val handledOnList = hostView.dispatchGenericMotionEvent(trackpadScrollOnList)
+        trackpadScrollOnList.recycle()
+        assertThat(handledOnList).isTrue()
 
-        assertThat(handled).isTrue()
-        assertThat(horizontalScrollDelta).isEqualTo(-4.0f)
+        // Trackpad scroll over static child: host view returns false so parent Activity can handle swipe
+        hostView.removeAllViews()
+        hostView.addView(TextView(context).apply { text = "Static widget" })
+        val trackpadScrollOnStatic = createTrackpadScrollEvent(vScroll = 2.0f, hScroll = 0f)
+        val handledOnStatic = hostView.dispatchGenericMotionEvent(trackpadScrollOnStatic)
+        trackpadScrollOnStatic.recycle()
+        assertThat(handledOnStatic).isFalse()
+    }
+
+    @Test
+    fun canChildScrollHorizontallyAndVertically_detectsScrollableContainers() {
+        val staticView = TextView(context).apply { text = "Static" }
+        hostView.addView(staticView)
+
+        assertThat(hostView.canChildScrollHorizontally(1)).isFalse()
+        assertThat(hostView.canChildScrollVertically(1)).isFalse()
+
+        val listView = ListView(context)
+        hostView.addView(listView)
+        assertThat(hostView.canChildScrollVertically(1)).isTrue()
+
+        val horizontalScroll = android.widget.HorizontalScrollView(context)
+        hostView.addView(horizontalScroll)
+        assertThat(hostView.canChildScrollHorizontally(1)).isTrue()
+    }
+
+    @Test
+    fun cancelChildTouches_dispatchesCancelWithoutThrowing() {
+        hostView.cancelChildTouches()
     }
 
     @Test
@@ -462,6 +484,35 @@ class DeckAppWidgetHostViewTest {
             0,
             0,
             android.view.InputDevice.SOURCE_MOUSE,
+            0
+        )
+    }
+
+    private fun createTrackpadScrollEvent(vScroll: Float, hScroll: Float): MotionEvent {
+        val pp = arrayOf(MotionEvent.PointerProperties().apply {
+            id = 0
+            toolType = MotionEvent.TOOL_TYPE_FINGER
+        })
+        val pc = arrayOf(MotionEvent.PointerCoords().apply {
+            x = 50f
+            y = 50f
+            setAxisValue(MotionEvent.AXIS_VSCROLL, vScroll)
+            setAxisValue(MotionEvent.AXIS_HSCROLL, hScroll)
+        })
+        return MotionEvent.obtain(
+            100L,
+            100L,
+            MotionEvent.ACTION_SCROLL,
+            1,
+            pp,
+            pc,
+            0,
+            0,
+            1.0f,
+            1.0f,
+            0,
+            0,
+            android.view.InputDevice.SOURCE_MOUSE or android.view.InputDevice.SOURCE_TOUCHPAD,
             0
         )
     }

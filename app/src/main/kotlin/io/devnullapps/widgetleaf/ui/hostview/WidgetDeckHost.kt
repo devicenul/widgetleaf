@@ -22,6 +22,8 @@ open class WidgetDeckHost(
         return DeckAppWidgetHostView(context)
     }
 
+    fun getHostView(appWidgetId: Int): DeckAppWidgetHostView? = hostViewCache[appWidgetId]
+
     fun createHostView(
         context: Context,
         appWidgetId: Int,

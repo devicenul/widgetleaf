@@ -228,6 +228,44 @@ class DeckViewModel(
         }
     }
 
+    /**
+     * Navigates to the previous page triggered by a touch or trackpad swipe gesture.
+     * Enforces strict non-wrapping boundaries (stops at Page 0).
+     */
+    fun swipePreviousPage(): Boolean {
+        cancelWidgetDrag()
+        val pages = _uiState.value.pages
+        val currentIndex = _uiState.value.activePageIndex
+        if (currentIndex > 0) {
+            val newIndex = currentIndex - 1
+            _uiState.update { it.copy(activePageIndex = newIndex) }
+            viewModelScope.launch {
+                repository.updateSettings { it.copy(lastViewedPageIndex = newIndex) }
+            }
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Navigates to the next page triggered by a touch or trackpad swipe gesture.
+     * Enforces strict non-wrapping boundaries and does not synthesize speculative pages.
+     */
+    fun swipeNextPage(): Boolean {
+        cancelWidgetDrag()
+        val pages = _uiState.value.pages
+        val currentIndex = _uiState.value.activePageIndex
+        if (currentIndex < pages.lastIndex) {
+            val newIndex = currentIndex + 1
+            _uiState.update { it.copy(activePageIndex = newIndex) }
+            viewModelScope.launch {
+                repository.updateSettings { it.copy(lastViewedPageIndex = newIndex) }
+            }
+            return true
+        }
+        return false
+    }
+
     fun selectPage(index: Int) {
         cancelWidgetDrag()
         val pages = _uiState.value.pages
