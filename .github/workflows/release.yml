@@ -12,14 +12,14 @@ permissions:
 jobs:
   release:
     name: Build Signed Release APK/AAB & Publish
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
@@ -52,7 +52,7 @@ jobs:
           ./gradlew assembleRelease bundleRelease --stacktrace
 
       - name: Upload Release Artifacts to Workflow
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: WidgetLeaf-release-artifacts
           path: |
@@ -61,7 +61,7 @@ jobs:
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             app/build/outputs/apk/release/*.apk
