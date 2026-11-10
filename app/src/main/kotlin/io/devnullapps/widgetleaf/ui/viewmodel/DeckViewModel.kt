@@ -45,6 +45,7 @@ class DeckViewModel(
     private var dragSnapshotPageCount: Int = 0
     private var dragDebounceJob: Job? = null
     private var draggingWidgetStartCell: Pair<Int, Int>? = null
+    private var dragSessionToken: Long = 0L
 
     init {
         viewModelScope.launch {
@@ -84,6 +85,7 @@ class DeckViewModel(
     // --- Overlay Lifecycle & Startup ---
 
     fun onOverlayShown() {
+        cancelWidgetDrag()
         viewModelScope.launch {
             reconcileOrphanWidgetsUseCase()
             val profile = _uiState.value.gridProfile
@@ -95,8 +97,33 @@ class DeckViewModel(
             } else {
                 settings.lastViewedPageIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
             }
+
+            // Refresh stored widget limits from installed provider info where available
+            val catalogMap = catalog.associateBy { it.providerPackage to it.providerClass }
+            val currentWidgets = _uiState.value.widgets
+            val refreshedWidgets = currentWidgets.map { w ->
+                val provider = catalogMap[w.providerPackage to w.providerClass]
+                if (provider != null) {
+                    w.copy(
+                        minSpanX = provider.minSpanX,
+                        minSpanY = provider.minSpanY,
+                        maxSpanX = provider.maxSpanX,
+                        maxSpanY = provider.maxSpanY,
+                        resizeMode = provider.resizeMode,
+                        isReconfigurable = provider.isReconfigurable,
+                        label = if (w.label.isBlank()) provider.widgetLabel else w.label
+                    )
+                } else {
+                    w
+                }
+            }
+            if (refreshedWidgets != currentWidgets) {
+                repository.upsertWidgets(refreshedWidgets)
+            }
+
             _uiState.update { current ->
                 current.copy(
+                    widgets = refreshedWidgets,
                     catalogItems = catalog,
                     activePageIndex = targetPage,
                     isLaunchingInternalFlow = false,
@@ -109,6 +136,7 @@ class DeckViewModel(
     // --- Page Navigation ---
 
     fun navigatePreviousPage() {
+        cancelWidgetDrag()
         val pages = _uiState.value.pages
         if (pages.size <= 1) return
         val currentIndex = _uiState.value.activePageIndex
@@ -120,6 +148,7 @@ class DeckViewModel(
     }
 
     fun navigateNextPage() {
+        cancelWidgetDrag()
         val pages = _uiState.value.pages
         if (pages.size <= 1) return
         val currentIndex = _uiState.value.activePageIndex
@@ -131,6 +160,7 @@ class DeckViewModel(
     }
 
     fun selectPage(index: Int) {
+        cancelWidgetDrag()
         val pages = _uiState.value.pages
         if (index in pages.indices) {
             _uiState.update { it.copy(activePageIndex = index) }
@@ -141,6 +171,7 @@ class DeckViewModel(
     }
 
     fun jumpToPageByNumberKey(numberKey: Int) {
+        cancelWidgetDrag()
         val targetIndex = when (numberKey) {
             in 1..9 -> numberKey - 1
             0 -> 9
@@ -454,6 +485,7 @@ class DeckViewModel(
     }
 
     fun exitWidgetEditMode() {
+        cancelWidgetDrag()
         _uiState.update { it.copy(editingWidgetId = null) }
     }
 
@@ -465,6 +497,8 @@ class DeckViewModel(
 
     fun startWidgetDrag(appWidgetId: Int) {
         dragDebounceJob?.cancel()
+        dragDebounceJob = null
+        dragSessionToken++
         val currentWidgets = _uiState.value.widgets
         val dragged = currentWidgets.find { it.appWidgetId == appWidgetId }
         dragSnapshotWidgets = currentWidgets
@@ -504,8 +538,13 @@ class DeckViewModel(
             it.copy(hoveredCell = Pair(cellX, cellY))
         }
 
+        val sessionToken = dragSessionToken
         dragDebounceJob = viewModelScope.launch {
             delay(250L)
+            if (dragSessionToken != sessionToken || _uiState.value.draggingWidgetId != appWidgetId) {
+                return@launch
+            }
+
             val currentSnapshot = dragSnapshotWidgets ?: return@launch
             val orig = currentSnapshot.find { it.appWidgetId == appWidgetId } ?: return@launch
             val profile = _uiState.value.gridProfile
@@ -523,11 +562,15 @@ class DeckViewModel(
 
             if (result != null) {
                 _uiState.update { current ->
-                    current.copy(
-                        previewWidgets = result.widgets,
-                        previewPageCount = result.pageCount,
-                        displacedWidgetIds = result.movedWidgetIds
-                    )
+                    if (dragSessionToken != sessionToken || current.draggingWidgetId != appWidgetId) {
+                        current
+                    } else {
+                        current.copy(
+                            previewWidgets = result.widgets,
+                            previewPageCount = result.pageCount,
+                            displacedWidgetIds = result.movedWidgetIds
+                        )
+                    }
                 }
             }
         }
@@ -536,6 +579,7 @@ class DeckViewModel(
     fun commitWidgetDrag(appWidgetId: Int, cellX: Int, cellY: Int) {
         dragDebounceJob?.cancel()
         dragDebounceJob = null
+        dragSessionToken++
 
         val snapshot = dragSnapshotWidgets ?: _uiState.value.widgets
         val pageCount = if (dragSnapshotPageCount > 0) dragSnapshotPageCount else _uiState.value.pages.size
@@ -590,6 +634,7 @@ class DeckViewModel(
     fun cancelWidgetDrag() {
         dragDebounceJob?.cancel()
         dragDebounceJob = null
+        dragSessionToken++
         dragSnapshotWidgets = null
         dragSnapshotPageCount = 0
         draggingWidgetStartCell = null
@@ -662,8 +707,16 @@ class DeckViewModel(
         val allWidgets = _uiState.value.widgets
         val current = allWidgets.find { it.appWidgetId == appWidgetId } ?: return
         val profile = _uiState.value.gridProfile
-        val clampedSpanX = newSpanX.coerceIn(1, profile.columns)
-        val clampedSpanY = newSpanY.coerceIn(1, profile.rows)
+
+        // Max span is clamped to explicit provider maxSpan if declared (in 1 until profile columns/rows), else profile columns/rows
+        val maxAvailableX = if (current.maxSpanX in 1 until profile.columns) current.maxSpanX else profile.columns
+        val maxAvailableY = if (current.maxSpanY in 1 until profile.rows) current.maxSpanY else profile.rows
+
+        val minAllowedX = current.minSpanX.coerceIn(1, maxAvailableX)
+        val minAllowedY = current.minSpanY.coerceIn(1, maxAvailableY)
+
+        val clampedSpanX = newSpanX.coerceIn(minAllowedX, maxAvailableX)
+        val clampedSpanY = newSpanY.coerceIn(minAllowedY, maxAvailableY)
         val clampedCellX = newCellX.coerceIn(0, (profile.columns - clampedSpanX).coerceAtLeast(0))
         val clampedCellY = newCellY.coerceIn(0, (profile.rows - clampedSpanY).coerceAtLeast(0))
 
@@ -712,21 +765,6 @@ class DeckViewModel(
             maxWidthDp = sizes.maxWidthDp,
             maxHeightDp = sizes.maxHeightDp
         )
-    }
-
-    fun moveOrResizeWidget(
-        appWidgetId: Int,
-        newCellX: Int,
-        newCellY: Int,
-        newSpanX: Int,
-        newSpanY: Int
-    ) {
-        val current = _uiState.value.widgets.find { it.appWidgetId == appWidgetId } ?: return
-        if (current.spanX == newSpanX && current.spanY == newSpanY) {
-            moveWidget(appWidgetId, newCellX, newCellY)
-        } else {
-            resizeWidget(appWidgetId, newCellX, newCellY, newSpanX, newSpanY)
-        }
     }
 
     fun dragWidgetAcrossEdge(
@@ -788,6 +826,7 @@ class DeckViewModel(
     }
 
     fun removeWidget(appWidgetId: Int) {
+        cancelWidgetDrag()
         widgetHostGateway.deleteAppWidgetId(appWidgetId)
         _uiState.update { current ->
             val remainingWidgets = current.widgets.filter { it.appWidgetId != appWidgetId }
@@ -824,6 +863,10 @@ class DeckViewModel(
     fun handleEscapeKey(): Boolean {
         val current = _uiState.value
         return when {
+            current.draggingWidgetId != null || current.previewWidgets != null -> {
+                cancelWidgetDrag()
+                true
+            }
             current.editingPageLabelIndex != null -> {
                 cancelEditingPageLabel()
                 true

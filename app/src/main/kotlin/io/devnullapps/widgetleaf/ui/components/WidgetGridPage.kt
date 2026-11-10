@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -51,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -93,7 +95,6 @@ fun WidgetGridPage(
     useCenteredBentoCanvas: Boolean = true,
     draggingWidgetId: Int? = null,
     hoveredCell: Pair<Int, Int>? = null,
-    displacedWidgetIds: Set<Int> = emptySet(),
     onStartWidgetDrag: (appWidgetId: Int) -> Unit = {},
     onWidgetHoverCellChanged: (appWidgetId: Int, cellX: Int, cellY: Int) -> Unit = { _, _, _ -> },
     onCommitWidgetDrag: ((appWidgetId: Int, cellX: Int, cellY: Int) -> Unit)? = null,
@@ -324,6 +325,8 @@ fun WidgetGridPage(
             val cellStepXPx = with(density) { (gridProfile.cellWidthDp + gridProfile.gutterDp).dp.toPx() }
             val cellStepYPx = with(density) { (gridProfile.cellHeightDp + gridProfile.gutterDp).dp.toPx() }
 
+            var justDroppedWidgetId by remember { mutableStateOf<Int?>(null) }
+
             // Subtle drop-target ghost outline at the hovered cell during widget drag
             if (draggingWidgetId != null && hoveredCell != null) {
                 val dragged = currentWidgets.find { it.appWidgetId == draggingWidgetId }
@@ -356,6 +359,18 @@ fun WidgetGridPage(
                     val isEditing = editingWidgetId == widget.appWidgetId
                     val isCurrentlyDragged = draggingWidgetId == widget.appWidgetId
 
+                    var isFirstComposition by remember(widget.appWidgetId) { mutableStateOf(true) }
+                    SideEffect {
+                        isFirstComposition = false
+                    }
+
+                    val isJustDropped = justDroppedWidgetId == widget.appWidgetId
+                    LaunchedEffect(isJustDropped, widget.cellX, widget.cellY) {
+                        if (isJustDropped) {
+                            justDroppedWidgetId = null
+                        }
+                    }
+
                     var moveDragX by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
                     var moveDragY by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
                     var dragStartCell by remember(widget.appWidgetId) { mutableStateOf<Pair<Int, Int>?>(null) }
@@ -372,29 +387,29 @@ fun WidgetGridPage(
                     val targetLeftDp = (gridProfile.marginDp + baseCellX * (gridProfile.cellWidthDp + gridProfile.gutterDp)).dp
                     val targetTopDp = (gridProfile.marginDp + baseCellY * (gridProfile.cellHeightDp + gridProfile.gutterDp)).dp
 
-                    // Non-dragged widgets animate position changes with spring; dragged widget snaps
-                    val shouldAnimate = !isCurrentlyDragged && dragStartCell == null
+                    // Non-dragged widgets animate position changes with spring; dragged and just-dropped widgets snap
+                    val shouldAnimate = !isFirstComposition && !isCurrentlyDragged && dragStartCell == null && !isJustDropped
                     val animatedLeftDp by animateDpAsState(
                         targetValue = targetLeftDp,
                         animationSpec = if (shouldAnimate) {
-                            spring(
+                            spring<Dp>(
                                 dampingRatio = MotionSpec.PAGE_FLIP_SPRING_DAMPING,
                                 stiffness = MotionSpec.PAGE_FLIP_SPRING_STIFFNESS
                             )
                         } else {
-                            snap()
+                            snap<Dp>()
                         },
                         label = "widget_x_${widget.appWidgetId}"
                     )
                     val animatedTopDp by animateDpAsState(
                         targetValue = targetTopDp,
                         animationSpec = if (shouldAnimate) {
-                            spring(
+                            spring<Dp>(
                                 dampingRatio = MotionSpec.PAGE_FLIP_SPRING_DAMPING,
                                 stiffness = MotionSpec.PAGE_FLIP_SPRING_STIFFNESS
                             )
                         } else {
-                            snap()
+                            snap<Dp>()
                         },
                         label = "widget_y_${widget.appWidgetId}"
                     )
@@ -521,6 +536,7 @@ fun WidgetGridPage(
                                                 }
                                             },
                                             onDragCancel = {
+                                                justDroppedWidgetId = null
                                                 currentOnCancelWidgetDrag()
                                                 dragStartCell = null
                                                 lastHoverReportedCell = null
@@ -562,13 +578,16 @@ fun WidgetGridPage(
                                                     (currentRightPx > gridRightPx + edgeOvershootPx || pointerInRootX > screenWidthPx - screenEdgeZonePx)
 
                                                 if (bumpedLeft) {
+                                                    justDroppedWidgetId = null
                                                     currentOnCancelWidgetDrag()
                                                     val landingX = (prof.columns - w.spanX).coerceAtLeast(0)
                                                     currentOnDragAcrossEdge(w.appWidgetId, EdgeDirection.LEFT, landingX, targetCellY)
                                                 } else if (bumpedRight) {
+                                                    justDroppedWidgetId = null
                                                     currentOnCancelWidgetDrag()
                                                     currentOnDragAcrossEdge(w.appWidgetId, EdgeDirection.RIGHT, 0, targetCellY)
                                                 } else {
+                                                    justDroppedWidgetId = w.appWidgetId
                                                     currentOnCommitWidgetDrag(w.appWidgetId, targetCellX, targetCellY)
                                                 }
 

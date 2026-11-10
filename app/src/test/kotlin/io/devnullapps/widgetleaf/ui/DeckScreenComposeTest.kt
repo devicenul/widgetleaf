@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.test.swipeUp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import io.devnullapps.widgetleaf.domain.model.DeckPage
@@ -509,8 +510,8 @@ class DeckScreenComposeTest {
             spanY = 2,
             minSpanX = 2,
             minSpanY = 2,
-            maxSpanX = 2,
-            maxSpanY = 2,
+            maxSpanX = 8,
+            maxSpanY = 8,
             isReconfigurable = true,
             label = "Calendar"
         )
@@ -612,8 +613,8 @@ class DeckScreenComposeTest {
             spanY = 2,
             minSpanX = 2,
             minSpanY = 2,
-            maxSpanX = 2,
-            maxSpanY = 2,
+            maxSpanX = 8,
+            maxSpanY = 8,
             label = "Widget 1"
         )
         val w2 = PlacedWidget(
@@ -627,8 +628,8 @@ class DeckScreenComposeTest {
             spanY = 2,
             minSpanX = 2,
             minSpanY = 2,
-            maxSpanX = 2,
-            maxSpanY = 2,
+            maxSpanX = 8,
+            maxSpanY = 8,
             label = "Widget 2"
         )
 
@@ -710,6 +711,195 @@ class DeckScreenComposeTest {
         assertThat(finalW2?.cellY).isEqualTo(2)
         assertThat(finalW2?.spanX).isEqualTo(2)
         assertThat(finalW2?.spanY).isEqualTo(2)
+    }
+
+    @Test
+    fun resizeHandleRespectsExplicitMaxSpan() {
+        var resizedSpanY = -1
+        val widget = PlacedWidget(
+            appWidgetId = 301,
+            providerPackage = "io.devnullapps.calendar",
+            providerClass = "CalendarWidget",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            minSpanX = 1,
+            minSpanY = 1,
+            maxSpanX = 3,
+            maxSpanY = 3,
+            isReconfigurable = true,
+            label = "Calendar"
+        )
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = DeckUiState(
+                    widgets = listOf(widget),
+                    editingWidgetId = 301
+                ),
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                onResizeWidget = { _, _, _, _, newSpanY ->
+                    resizedSpanY = newSpanY
+                }
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        // Drag bottom resize handle down by 500px -> must clamp to maxSpanY = 3
+        composeTestRule.onNodeWithTag("resize_handle_bottom_301").performTouchInput {
+            swipeDown(startY = centerY, endY = centerY + 500f, durationMillis = 200)
+        }
+        composeTestRule.waitForIdle()
+        assertThat(resizedSpanY).isEqualTo(3)
+    }
+
+    @Test
+    fun resizeHandleRespectsMinSpan() {
+        var resizedSpanY = -1
+        val widget = PlacedWidget(
+            appWidgetId = 302,
+            providerPackage = "io.devnullapps.calendar",
+            providerClass = "CalendarWidget",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 3,
+            spanY = 3,
+            minSpanX = 2,
+            minSpanY = 2,
+            maxSpanX = 8,
+            maxSpanY = 8,
+            isReconfigurable = true,
+            label = "Calendar"
+        )
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = DeckUiState(
+                    widgets = listOf(widget),
+                    editingWidgetId = 302
+                ),
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                onResizeWidget = { _, _, _, _, newSpanY ->
+                    resizedSpanY = newSpanY
+                }
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        // Drag bottom resize handle up by 500px -> must clamp to minSpanY = 2
+        composeTestRule.onNodeWithTag("resize_handle_bottom_302").performTouchInput {
+            swipeUp(startY = centerY, endY = centerY - 500f, durationMillis = 200)
+        }
+        composeTestRule.waitForIdle()
+        assertThat(resizedSpanY).isEqualTo(2)
+    }
+
+    @Test
+    fun resizeModeControlsHandleVisibility() {
+        val noneWidget = PlacedWidget(
+            appWidgetId = 401,
+            providerPackage = "pkg",
+            providerClass = "Class1",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            resizeMode = PlacedWidget.RESIZE_NONE
+        )
+        val horizWidget = PlacedWidget(
+            appWidgetId = 402,
+            providerPackage = "pkg",
+            providerClass = "Class2",
+            pageIndex = 0,
+            cellX = 2,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            resizeMode = PlacedWidget.RESIZE_HORIZONTAL
+        )
+        val vertWidget = PlacedWidget(
+            appWidgetId = 403,
+            providerPackage = "pkg",
+            providerClass = "Class3",
+            pageIndex = 0,
+            cellX = 4,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            resizeMode = PlacedWidget.RESIZE_VERTICAL
+        )
+
+        var editingId by mutableStateOf<Int?>(401)
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = DeckUiState(
+                    widgets = listOf(noneWidget, horizWidget, vertWidget),
+                    editingWidgetId = editingId
+                ),
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> }
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        // RESIZE_NONE: no handles exist
+        composeTestRule.onNodeWithTag("resize_handle_top_401").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_bottom_401").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_left_401").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_right_401").assertDoesNotExist()
+
+        // RESIZE_HORIZONTAL: only left and right handles
+        editingId = 402
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("resize_handle_left_402").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("resize_handle_right_402").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("resize_handle_top_402").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_bottom_402").assertDoesNotExist()
+
+        // RESIZE_VERTICAL: only top and bottom handles
+        editingId = 403
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("resize_handle_top_403").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("resize_handle_bottom_403").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("resize_handle_left_403").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("resize_handle_right_403").assertDoesNotExist()
     }
 
     @Test

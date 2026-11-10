@@ -228,7 +228,6 @@ fun WidgetDeckOverlayScreen(
                     useCenteredBentoCanvas = uiState.settings.useCenteredBentoCanvas,
                     draggingWidgetId = uiState.draggingWidgetId,
                     hoveredCell = uiState.hoveredCell,
-                    displacedWidgetIds = uiState.displacedWidgetIds,
                     onStartWidgetDrag = { id ->
                         lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
                         onStartWidgetDrag(id)

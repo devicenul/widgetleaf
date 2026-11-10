@@ -336,8 +336,8 @@ class DeckViewModelTest {
             spanY = 2,
             minSpanX = 1,
             minSpanY = 1,
-            maxSpanX = 4,
-            maxSpanY = 4
+            maxSpanX = 8,
+            maxSpanY = 8
         )
         fakeRepository.setWidgets(listOf(widget))
 
@@ -482,6 +482,195 @@ class DeckViewModelTest {
         // Verified persisted to repository
         assertEquals(2, fakeRepository.pages.size)
         assertEquals(2, fakeRepository.widgets.size)
+    }
+
+    @Test
+    fun dragSession_lateDebounceAfterCommit_doesNotPublishPreview() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        viewModel.startWidgetDrag(1)
+        viewModel.onWidgetHoverCellChanged(1, cellX = 2, cellY = 0)
+        // Immediately commit before debounce triggers
+        viewModel.commitWidgetDrag(1, cellX = 2, cellY = 0)
+
+        // Advance time past debounce delay
+        advanceTimeBy(300)
+
+        // Preview should remain null; stale debounce job did not publish
+        assertNull(viewModel.uiState.value.previewWidgets)
+        assertNull(viewModel.uiState.value.draggingWidgetId)
+    }
+
+    @Test
+    fun dragSession_lateDebounceAfterCancel_doesNotPublishPreview() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        viewModel.startWidgetDrag(1)
+        viewModel.onWidgetHoverCellChanged(1, cellX = 2, cellY = 0)
+        // Immediately cancel before debounce triggers
+        viewModel.cancelWidgetDrag()
+
+        // Advance time past debounce delay
+        advanceTimeBy(300)
+
+        assertNull(viewModel.uiState.value.previewWidgets)
+        assertNull(viewModel.uiState.value.draggingWidgetId)
+    }
+
+    @Test
+    fun dragSession_hoverDebounceCommitEquivalence() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        viewModel.startWidgetDrag(1)
+        viewModel.onWidgetHoverCellChanged(1, cellX = 2, cellY = 0)
+        advanceTimeBy(260)
+
+        val previewWidgets = viewModel.uiState.value.previewWidgets!!
+        viewModel.commitWidgetDrag(1, cellX = 2, cellY = 0)
+
+        assertEquals(previewWidgets, viewModel.uiState.value.widgets)
+    }
+
+    @Test
+    fun exitEditMode_cancelsDragSession() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        viewModel.enterWidgetEditMode(1)
+        viewModel.startWidgetDrag(1)
+        viewModel.onWidgetHoverCellChanged(1, cellX = 2, cellY = 0)
+        advanceTimeBy(260)
+        assertNotNull(viewModel.uiState.value.previewWidgets)
+
+        viewModel.exitWidgetEditMode()
+        assertNull(viewModel.uiState.value.editingWidgetId)
+        assertNull(viewModel.uiState.value.previewWidgets)
+        assertNull(viewModel.uiState.value.draggingWidgetId)
+    }
+
+    @Test
+    fun escapeKey_cancelsActiveDragSession() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        viewModel.enterWidgetEditMode(1)
+        viewModel.startWidgetDrag(1)
+        viewModel.onWidgetHoverCellChanged(1, cellX = 2, cellY = 0)
+        advanceTimeBy(260)
+        assertNotNull(viewModel.uiState.value.previewWidgets)
+
+        val handled = viewModel.handleEscapeKey()
+        assertTrue(handled)
+        assertNull(viewModel.uiState.value.previewWidgets)
+        assertNull(viewModel.uiState.value.draggingWidgetId)
+    }
+
+    @Test
+    fun pageNavigation_cancelsActiveDragSession() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setPages(listOf(DeckPage(0), DeckPage(1)))
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        viewModel.startWidgetDrag(1)
+        viewModel.onWidgetHoverCellChanged(1, cellX = 2, cellY = 0)
+        advanceTimeBy(260)
+        assertNotNull(viewModel.uiState.value.previewWidgets)
+
+        viewModel.selectPage(1)
+        assertNull(viewModel.uiState.value.previewWidgets)
+        assertNull(viewModel.uiState.value.draggingWidgetId)
+    }
+
+    @Test
+    fun resizeWidget_respectsMinSpan() = runTest {
+        val widget = createWidget(id = 10, pageIndex = 0, cellX = 0, cellY = 0, spanX = 3, spanY = 3, minSpanX = 2, minSpanY = 2)
+        fakeRepository.setWidgets(listOf(widget))
+
+        // Attempt to shrink to 1x1 below minimum span 2x2
+        viewModel.resizeWidget(10, newCellX = 0, newCellY = 0, newSpanX = 1, newSpanY = 1)
+        val clamped = viewModel.uiState.value.widgets.first()
+        assertEquals(2, clamped.spanX)
+        assertEquals(2, clamped.spanY)
+    }
+
+    @Test
+    fun resizeWidget_respectsExplicitMaxSpan() = runTest {
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 8, rows = 8))
+        // Explicit provider max is 3x3 on an 8x8 grid
+        val widget = createWidget(id = 10, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2, maxSpanX = 3, maxSpanY = 3)
+        fakeRepository.setWidgets(listOf(widget))
+
+        // Attempt to expand to 6x6 beyond explicit maxSpan 3x3
+        viewModel.resizeWidget(10, newCellX = 0, newCellY = 0, newSpanX = 6, newSpanY = 6)
+        val clamped = viewModel.uiState.value.widgets.first()
+        assertEquals(3, clamped.spanX)
+        assertEquals(3, clamped.spanY)
+    }
+
+    @Test
+    fun resizeWidget_noExplicitMax_allowsResizingUpToGrid() = runTest {
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 8, rows = 6))
+        // maxSpan is equal to grid columns (no explicit provider max cap)
+        val widget = createWidget(id = 10, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2, maxSpanX = 8, maxSpanY = 8)
+        fakeRepository.setWidgets(listOf(widget))
+
+        viewModel.resizeWidget(10, newCellX = 0, newCellY = 0, newSpanX = 6, newSpanY = 5)
+        val expanded = viewModel.uiState.value.widgets.first()
+        assertEquals(6, expanded.spanX)
+        assertEquals(5, expanded.spanY)
+    }
+
+    @Test
+    fun onOverlayShown_refreshesPersistedWidgetLimitsFromCatalog() = runTest {
+        val staleWidget = createWidget(
+            id = 50,
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            minSpanX = 1,
+            minSpanY = 1,
+            maxSpanX = 12,
+            maxSpanY = 8
+        )
+        fakeGateway.allocatedIds = listOf(50)
+        fakeGateway.installedProviders.add(staleWidget.providerPackage to staleWidget.providerClass)
+        fakeRepository.setWidgets(listOf(staleWidget))
+
+        fakeGateway.catalogToReturn = listOf(
+            WidgetCatalogItem(
+                providerPackage = staleWidget.providerPackage,
+                providerClass = staleWidget.providerClass,
+                appName = "App50",
+                widgetLabel = "Widget50",
+                defaultSpanX = 2,
+                defaultSpanY = 2,
+                minSpanX = 2,
+                minSpanY = 3,
+                maxSpanX = 4,
+                maxSpanY = 5,
+                resizeMode = PlacedWidget.RESIZE_VERTICAL
+            )
+        )
+
+        viewModel.onOverlayShown()
+
+        val refreshed = viewModel.uiState.value.widgets.first { it.appWidgetId == 50 }
+        assertEquals(2, refreshed.minSpanX)
+        assertEquals(3, refreshed.minSpanY)
+        assertEquals(4, refreshed.maxSpanX)
+        assertEquals(5, refreshed.maxSpanY)
+        assertEquals(PlacedWidget.RESIZE_VERTICAL, refreshed.resizeMode)
     }
 
     // --- 7. Cross-Edge Drag Transitions & Auto-Pruning ---
