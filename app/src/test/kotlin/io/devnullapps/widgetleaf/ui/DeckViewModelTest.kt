@@ -440,7 +440,8 @@ class DeckViewModelTest {
         minSpanX: Int = 1,
         minSpanY: Int = 1,
         maxSpanX: Int = 4,
-        maxSpanY: Int = 4
+        maxSpanY: Int = 4,
+        resizeMode: Int = PlacedWidget.RESIZE_BOTH
     ) = PlacedWidget(
         appWidgetId = id,
         providerPackage = "com.pkg$id",
@@ -453,8 +454,172 @@ class DeckViewModelTest {
         minSpanX = minSpanX,
         minSpanY = minSpanY,
         maxSpanX = maxSpanX,
-        maxSpanY = maxSpanY
+        maxSpanY = maxSpanY,
+        resizeMode = resizeMode
     )
+
+    @Test
+    fun resizeSession_previewAppearsAfterDebounce_andRevertsOnNonOverlapping() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        viewModel.startWidgetResize(1)
+        assertEquals(1, viewModel.uiState.value.resizingWidgetId)
+        assertNull(viewModel.uiState.value.previewWidgets)
+
+        // Expand w1 to spanX = 3, cellX = 0 (overlapping w2 at 2,0)
+        viewModel.onWidgetResizeBoundsChanged(1, cellX = 0, cellY = 0, spanX = 3, spanY = 2)
+        // Before debounce delay (250ms), preview is still null
+        assertNull(viewModel.uiState.value.previewWidgets)
+
+        // Advance virtual time by 260ms
+        advanceTimeBy(260)
+
+        // Preview state published
+        val preview = viewModel.uiState.value.previewWidgets
+        assertNotNull(preview)
+        val previewW1 = preview!!.find { it.appWidgetId == 1 }
+        val previewW2 = preview.find { it.appWidgetId == 2 }
+        assertEquals(0, previewW1?.cellX)
+        assertEquals(0, previewW1?.cellY)
+        assertEquals(3, previewW1?.spanX)
+        assertEquals(2, previewW1?.spanY)
+
+        // w2 was displaced column-major downward to cellY = 2
+        assertEquals(2, previewW2?.cellX)
+        assertEquals(2, previewW2?.cellY)
+        assertTrue(viewModel.uiState.value.displacedWidgetIds.contains(2))
+
+        // Resize back to non-overlapping original size (spanX = 2) -> preview immediately clears
+        viewModel.onWidgetResizeBoundsChanged(1, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        assertNull(viewModel.uiState.value.previewWidgets)
+        assertTrue(viewModel.uiState.value.displacedWidgetIds.isEmpty())
+    }
+
+    @Test
+    fun resizeSession_revertOnCancel() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        viewModel.startWidgetResize(1)
+        viewModel.onWidgetResizeBoundsChanged(1, cellX = 0, cellY = 0, spanX = 3, spanY = 2)
+        advanceTimeBy(260)
+        assertNotNull(viewModel.uiState.value.previewWidgets)
+
+        viewModel.cancelWidgetResize()
+        assertNull(viewModel.uiState.value.previewWidgets)
+        assertNull(viewModel.uiState.value.resizingWidgetId)
+        assertTrue(viewModel.uiState.value.displacedWidgetIds.isEmpty())
+
+        // Original widgets in uiState remain untouched
+        val currentW1 = viewModel.uiState.value.widgets.find { it.appWidgetId == 1 }
+        assertEquals(2, currentW1?.spanX)
+    }
+
+    @Test
+    fun resizeSession_commitPersists_includingNewPage() = runTest(testDispatcher) {
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 2, rows = 2))
+        val page0 = DeckPage(0)
+        fakeRepository.setPages(listOf(page0))
+
+        // Grid 2x2: w1 (2x1 at 0,0), w2 (2x1 at 0,1) fills page 0
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 1)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 0, cellY = 1, spanX = 2, spanY = 1)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        viewModel.startWidgetResize(1)
+        // Grow w1 height to 2 -> w2 will cascade onto Page 1!
+        viewModel.commitWidgetResize(1, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+
+        // Debounce cancelled, immediately committed & pages extended
+        assertNull(viewModel.uiState.value.previewWidgets)
+        assertNull(viewModel.uiState.value.resizingWidgetId)
+        assertEquals(2, viewModel.uiState.value.pages.size)
+
+        val committedW1 = viewModel.uiState.value.widgets.find { it.appWidgetId == 1 }
+        val committedW2 = viewModel.uiState.value.widgets.find { it.appWidgetId == 2 }
+        assertEquals(0, committedW1?.pageIndex)
+        assertEquals(2, committedW1?.spanY)
+
+        assertEquals(1, committedW2?.pageIndex)
+        assertEquals(0, committedW2?.cellX)
+        assertEquals(0, committedW2?.cellY)
+
+        // Verified persisted to repository
+        assertEquals(2, fakeRepository.pages.size)
+        assertEquals(2, fakeRepository.widgets.size)
+    }
+
+    @Test
+    fun resizeSession_lateDebounceAfterCommit_doesNotPublishPreview() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        viewModel.startWidgetResize(1)
+        viewModel.onWidgetResizeBoundsChanged(1, cellX = 0, cellY = 0, spanX = 3, spanY = 2)
+        // Immediately commit before debounce triggers
+        viewModel.commitWidgetResize(1, cellX = 0, cellY = 0, spanX = 3, spanY = 2)
+
+        // Advance time past debounce delay
+        advanceTimeBy(300)
+
+        // Preview should remain null; stale debounce job did not publish
+        assertNull(viewModel.uiState.value.previewWidgets)
+        assertNull(viewModel.uiState.value.resizingWidgetId)
+    }
+
+    @Test
+    fun resizeSession_lateDebounceAfterCancel_doesNotPublishPreview() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2))
+
+        viewModel.startWidgetResize(1)
+        viewModel.onWidgetResizeBoundsChanged(1, cellX = 0, cellY = 0, spanX = 3, spanY = 2)
+        // Immediately cancel before debounce triggers
+        viewModel.cancelWidgetResize()
+
+        // Advance time past debounce delay
+        advanceTimeBy(300)
+
+        assertNull(viewModel.uiState.value.previewWidgets)
+        assertNull(viewModel.uiState.value.resizingWidgetId)
+    }
+
+    @Test
+    fun resizeSession_respectsLimitsAndResizeMode() = runTest(testDispatcher) {
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 6, rows = 6))
+        // w1 only horizontal resize, minSpan 2, maxSpan 4
+        val w1 = createWidget(
+            id = 1,
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2,
+            minSpanX = 2,
+            minSpanY = 2,
+            maxSpanX = 4,
+            maxSpanY = 4,
+            resizeMode = PlacedWidget.RESIZE_HORIZONTAL
+        )
+        fakeRepository.setWidgets(listOf(w1))
+
+        // Attempting to change spanY when resizeMode is RESIZE_HORIZONTAL preserves original spanY (2)
+        // And clamps spanX to maxSpanX (4)
+        viewModel.commitWidgetResize(1, cellX = 0, cellY = 0, spanX = 6, spanY = 5)
+        val committed = viewModel.uiState.value.widgets.find { it.appWidgetId == 1 }!!
+        assertEquals(4, committed.spanX)
+        assertEquals(2, committed.spanY)
+
+        // Attempting to shrink spanX below minSpanX (2) clamps to minSpanX
+        viewModel.commitWidgetResize(1, cellX = 0, cellY = 0, spanX = 1, spanY = 2)
+        val clampedMin = viewModel.uiState.value.widgets.find { it.appWidgetId == 1 }!!
+        assertEquals(2, clampedMin.spanX)
+    }
 
     @Test
     fun dragSession_previewAppearsAfterDebounce_andRevertsOnHoverBack() = runTest(testDispatcher) {
@@ -1158,10 +1323,11 @@ class DeckViewModelTest {
         defaultSpanX = spanX,
         defaultSpanY = spanY
     )
+}
 
-    // --- Test Fakes ---
+// --- Test Fakes ---
 
-    private class FakeWidgetDeckRepository(
+internal class FakeWidgetDeckRepository(
         initialPages: List<DeckPage> = listOf(DeckPage(0)),
         initialWidgets: List<PlacedWidget> = emptyList(),
         initialSettings: OverlaySettings = OverlaySettings()
@@ -1242,7 +1408,7 @@ class DeckViewModelTest {
         }
     }
 
-    private class FakeWidgetHostGateway : WidgetHostGateway {
+    internal class FakeWidgetHostGateway : WidgetHostGateway {
         var nextAllocatedId = 100
         val deletedIds = mutableListOf<Int>()
         var allowBind = true
@@ -1303,4 +1469,3 @@ class DeckViewModelTest {
         val maxWidthDp: Int,
         val maxHeightDp: Int
     )
-}

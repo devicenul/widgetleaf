@@ -49,6 +49,10 @@ fun WidgetEditDragLayer(
     onResizeWidget: (appWidgetId: Int, newCellX: Int, newCellY: Int, newSpanX: Int, newSpanY: Int) -> Unit,
     onRemoveWidget: (appWidgetId: Int) -> Unit,
     onReconfigureWidget: ((appWidgetId: Int) -> Unit)?,
+    onStartWidgetResize: (appWidgetId: Int) -> Unit = {},
+    onWidgetResizeBoundsChanged: (appWidgetId: Int, cellX: Int, cellY: Int, spanX: Int, spanY: Int) -> Unit = { _, _, _, _, _ -> },
+    onCommitWidgetResize: (appWidgetId: Int, cellX: Int, cellY: Int, spanX: Int, spanY: Int) -> Unit = { id, x, y, sx, sy -> onResizeWidget(id, x, y, sx, sy) },
+    onCancelWidgetResize: () -> Unit = onCancelWidgetDrag,
     modifier: Modifier = Modifier,
     widgetContent: @Composable (PlacedWidget) -> Unit
 ) {
@@ -67,6 +71,10 @@ fun WidgetEditDragLayer(
     val currentOnResizeWidget by rememberUpdatedState(onResizeWidget)
     val currentOnRemoveWidget by rememberUpdatedState(onRemoveWidget)
     val currentOnReconfigureWidget by rememberUpdatedState(onReconfigureWidget)
+    val currentOnStartWidgetResize by rememberUpdatedState(onStartWidgetResize)
+    val currentOnWidgetResizeBoundsChanged by rememberUpdatedState(onWidgetResizeBoundsChanged)
+    val currentOnCommitWidgetResize by rememberUpdatedState(onCommitWidgetResize)
+    val currentOnCancelWidgetResize by rememberUpdatedState(onCancelWidgetResize)
 
     var moveDragX by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
     var moveDragY by remember(widget.appWidgetId) { mutableFloatStateOf(0f) }
@@ -74,6 +82,8 @@ fun WidgetEditDragLayer(
     var lastHoverReportedCell by remember(widget.appWidgetId) { mutableStateOf<Pair<Int, Int>?>(null) }
     var activeEdgeZone by remember(widget.appWidgetId) { mutableStateOf<EdgeDirection?>(null) }
     var isLocalDragging by remember(widget.appWidgetId) { mutableStateOf(false) }
+    var isLocalResizing by remember(widget.appWidgetId) { mutableStateOf(false) }
+    var resizeStartBounds by remember(widget.appWidgetId) { mutableStateOf<io.devnullapps.widgetleaf.domain.model.GridBounds?>(null) }
     var dwellJob by remember(widget.appWidgetId) { mutableStateOf<Job?>(null) }
     var rootLeftPx by remember { mutableFloatStateOf(0f) }
 
@@ -92,14 +102,51 @@ fun WidgetEditDragLayer(
         PointerIcon.Hand
     )
 
-    val widthDp = currentGridProfile.widthDpForSpan(widget.spanX).dp
-    val heightDp = currentGridProfile.heightDpForSpan(widget.spanY).dp
+    // INV-2 & INV-12: Base offset and span anchored at start throughout the gesture
+    val baseCellX = if (isLocalResizing && resizeStartBounds != null) {
+        resizeStartBounds!!.cellX
+    } else if (effectiveIsDragging && dragStartCell != null) {
+        dragStartCell!!.first
+    } else {
+        widget.cellX
+    }
 
-    // INV-2 & INV-12: Base offset anchored at dragStartCell throughout the entire session
-    val baseCellX = if (effectiveIsDragging && dragStartCell != null) dragStartCell!!.first else widget.cellX
-    val baseCellY = if (effectiveIsDragging && dragStartCell != null) dragStartCell!!.second else widget.cellY
+    val baseCellY = if (isLocalResizing && resizeStartBounds != null) {
+        resizeStartBounds!!.cellY
+    } else if (effectiveIsDragging && dragStartCell != null) {
+        dragStartCell!!.second
+    } else {
+        widget.cellY
+    }
+
+    val baseSpanX = if (isLocalResizing && resizeStartBounds != null) {
+        resizeStartBounds!!.spanX
+    } else {
+        widget.spanX
+    }
+
+    val baseSpanY = if (isLocalResizing && resizeStartBounds != null) {
+        resizeStartBounds!!.spanY
+    } else {
+        widget.spanY
+    }
+
+    val widthDp = currentGridProfile.widthDpForSpan(baseSpanX).dp
+    val heightDp = currentGridProfile.heightDpForSpan(baseSpanY).dp
+
     val targetLeftDp = (currentGridProfile.marginDp + baseCellX * (currentGridProfile.cellWidthDp + currentGridProfile.gutterDp)).dp
     val targetTopDp = (currentGridProfile.topMarginDp + baseCellY * (currentGridProfile.cellHeightDp + currentGridProfile.gutterDp)).dp
+
+    val frameWidget = if (isLocalResizing && resizeStartBounds != null) {
+        currentWidgetState.copy(
+            cellX = resizeStartBounds!!.cellX,
+            cellY = resizeStartBounds!!.cellY,
+            spanX = resizeStartBounds!!.spanX,
+            spanY = resizeStartBounds!!.spanY
+        )
+    } else {
+        currentWidgetState
+    }
 
     Box(
         modifier = modifier
@@ -117,7 +164,7 @@ fun WidgetEditDragLayer(
                     .fillMaxSize()
                     .offset { IntOffset(moveDragX.roundToInt(), moveDragY.roundToInt()) }
             ) {
-                widgetContent(widget)
+                widgetContent(frameWidget)
             }
 
             // Layer 2: Dedicated stationary move hit surface (INV-2, INV-11)
@@ -241,17 +288,37 @@ fun WidgetEditDragLayer(
                         .offset { IntOffset(moveDragX.roundToInt(), moveDragY.roundToInt()) }
                 ) {
                     WidgetEditResizeFrame(
-                        widget = currentWidgetState,
+                        widget = frameWidget,
                         gridProfile = currentGridProfile,
                         isEditing = true,
                         onResizeWidget = { newX, newY, newSpanX, newSpanY ->
-                            currentOnResizeWidget(currentWidgetState.appWidgetId, newX, newY, newSpanX, newSpanY)
+                            isLocalResizing = false
+                            resizeStartBounds = null
+                            currentOnCommitWidgetResize(currentWidgetState.appWidgetId, newX, newY, newSpanX, newSpanY)
                         },
                         onRemoveWidget = { id ->
                             currentOnRemoveWidget(id)
                         },
                         onReconfigureWidget = { id ->
                             currentOnReconfigureWidget?.invoke(id)
+                        },
+                        onStartResize = {
+                            isLocalResizing = true
+                            resizeStartBounds = io.devnullapps.widgetleaf.domain.model.GridBounds(
+                                cellX = currentWidgetState.cellX,
+                                cellY = currentWidgetState.cellY,
+                                spanX = currentWidgetState.spanX,
+                                spanY = currentWidgetState.spanY
+                            )
+                            currentOnStartWidgetResize(currentWidgetState.appWidgetId)
+                        },
+                        onResizeBoundsChange = { newX, newY, newSpanX, newSpanY ->
+                            currentOnWidgetResizeBoundsChanged(currentWidgetState.appWidgetId, newX, newY, newSpanX, newSpanY)
+                        },
+                        onCancelResize = {
+                            isLocalResizing = false
+                            resizeStartBounds = null
+                            currentOnCancelWidgetResize()
                         }
                     )
                 }
