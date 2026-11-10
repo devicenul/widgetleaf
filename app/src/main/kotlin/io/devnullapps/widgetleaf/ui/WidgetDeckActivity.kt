@@ -2,6 +2,7 @@ package io.devnullapps.widgetleaf.ui
 
 import android.Manifest
 import android.app.Activity
+import android.app.ActivityOptions
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Intent
@@ -14,6 +15,7 @@ import android.service.quicksettings.TileService
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.ViewGroup
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
@@ -100,7 +102,7 @@ class WidgetDeckActivity : ComponentActivity() {
         val density = resources.displayMetrics.density
         trackpadSwipeAccumulator.pageThresholdPx = 48f * density
         trackpadSwipeAccumulator.dismissThresholdPx = 72f * density
-        WindowCompat.setDecorFitsSystemWindows(window, false)
+        reassertOverlayPresentation()
 
         viewModel = ViewModelProvider(
             this,
@@ -407,16 +409,55 @@ class WidgetDeckActivity : ComponentActivity() {
         lastWidgetMutationOrFlowUptimeMs = SystemClock.uptimeMillis()
         viewModel.markLaunchingInternalFlow(true)
         try {
+            val options = createConfigureLaunchOptions()
             container.widgetDeckHost.startAppWidgetConfigureActivityForResult(
                 this,
                 appWidgetId,
                 0,
                 REQUEST_CODE_CONFIGURE_WIDGET,
-                null
+                options.toBundle()
             )
         } catch (t: Throwable) {
             viewModel.markLaunchingInternalFlow(false)
             viewModel.onConfigureWidgetResult(appWidgetId, resultOk = true)
+        }
+    }
+
+    internal fun createConfigureLaunchOptions(): ActivityOptions {
+        val options = ActivityOptions.makeBasic()
+        options.launchDisplayId = ActiveDisplayLaunchHelper.getActiveDisplayId(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            options.setPendingIntentBackgroundActivityStartMode(
+                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+            )
+        }
+        return options
+    }
+
+    internal fun reassertOverlayPresentation() {
+        try {
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                try {
+                    requestFullscreenMode(FULLSCREEN_MODE_REQUEST_ENTER, null)
+                } catch (_: Throwable) {
+                }
+            }
+
+            val blurRadius = if (::viewModel.isInitialized) {
+                viewModel.uiState.value.settings.blurRadiusDp
+            } else {
+                36
+            }
+            container.blurController.attachToWindow(window, blurRadius)
+            container.taskbarPlacementManager.syncRunningTaskbarPresence(this)
+        } catch (_: Throwable) {
         }
     }
 
@@ -436,6 +477,7 @@ class WidgetDeckActivity : ComponentActivity() {
                     resultOk = resultCode == Activity.RESULT_OK
                 )
             }
+            reassertOverlayPresentation()
         }
     }
 
@@ -487,6 +529,7 @@ class WidgetDeckActivity : ComponentActivity() {
         if (::viewModel.isInitialized && viewModel.uiState.value.pendingWidgetAction == null) {
             viewModel.markLaunchingInternalFlow(false)
         }
+        reassertOverlayPresentation()
     }
 
     override fun onPause() {

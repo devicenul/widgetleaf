@@ -156,5 +156,19 @@
   5. **Auto-Navigation:** The overlay automatically navigates to the page where the new widget was placed (`activePageIndex = candidate.pageIndex`) so the user immediately sees it.
   6. **Existing Widgets Cascade:** Moving and resizing *existing* placed widgets continues to use `CascadeDisplacementResolver`.
 
+### INV-20: Widget Configuration Flow Overlay Preservation & Windowing Mode
+- **Why:** On Android Desktop environments (Android 14/15 Desktop Mode, ChromeOS ARC-VM, Googlebook), launching a 3rd party widget configuration Activity (e.g. Clock or nzb360) places the external activity in a desktop freeform window. If the host activity does not manage launch options or re-assert its windowing state, the system restores the caller in a freeform desktop window container with title bar decorations and bounded coordinates instead of the top-layer full-screen frosted glass overlay.
+- **Rule:**
+  1. **Configure Launch Options:** `launchWidgetConfigurationActivity` MUST supply explicit `ActivityOptions` with `launchDisplayId = getActiveDisplayId(context)` and API 34+ `setPendingIntentBackgroundActivityStartMode(MODE_BACKGROUND_ACTIVITY_START_ALLOWED)`. It MUST keep `intentFlags = 0` (never inject `FLAG_ACTIVITY_NEW_TASK`, which breaks task token result routing and causes immediate `RESULT_CANCELED`).
+  2. **Isolated Task Affinity:** `WidgetDeckActivity` declares `android:taskAffinity="io.devnullapps.widgetleaf.overlay"` to prevent external activities from sharing or mutating its root task affinity.
+  3. **No Finish & Relaunch:** `WidgetDeckActivity` MUST NOT finish and relaunch itself upon receiving configuration results. The live activity instance is preserved across `onActivityResult`.
+  4. **Active Presentation Re-Assertion:** `WidgetDeckActivity.reassertOverlayPresentation()` actively re-asserts:
+     - `window.setLayout(MATCH_PARENT, MATCH_PARENT)` and `setDecorFitsSystemWindows(false)`;
+     - `FLAG_LAYOUT_IN_SCREEN` and `FLAG_LAYOUT_NO_LIMITS`;
+     - API 34+ `requestFullscreenMode(FULLSCREEN_MODE_REQUEST_ENTER, null)` to exit desktop freeform window mode and restore full-screen overlay;
+     - Blur attachment via `blurController.attachToWindow` and recents exclusion via `taskbarPlacementManager.syncRunningTaskbarPresence`.
+  5. **Lifecycle Re-Assertion Points:** `reassertOverlayPresentation()` is invoked in `onCreate()`, `onResume()`, and immediately in `onActivityResult()` when `REQUEST_CODE_CONFIGURE_WIDGET` completes (both on `RESULT_OK` and `RESULT_CANCELED`).
+
+
 
 

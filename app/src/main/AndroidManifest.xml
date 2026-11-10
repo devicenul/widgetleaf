@@ -36,6 +36,7 @@
             android:exported="true"
             android:launchMode="singleInstance"
             android:stateNotNeeded="true"
+            android:taskAffinity="io.devnullapps.widgetleaf.overlay"
             android:theme="@style/Theme.WidgetLeaf.Translucent">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

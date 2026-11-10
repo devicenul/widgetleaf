@@ -45,7 +45,8 @@ object ActiveDisplayLaunchHelper {
     }
 
     /**
-     * Builds [ActivityOptions] configured with [ActivityOptions.setLaunchDisplayId] for the active display.
+     * Builds [ActivityOptions] configured with [ActivityOptions.setLaunchDisplayId] for the active display
+     * and fullscreen windowing mode in desktop environments.
      */
     fun createLaunchOptions(
         context: Context,
@@ -53,6 +54,13 @@ object ActiveDisplayLaunchHelper {
     ): ActivityOptions {
         val options = ActivityOptions.makeBasic()
         options.launchDisplayId = displayId
+        try {
+            // WindowConfiguration.WINDOWING_MODE_FULLSCREEN = 1
+            val method = ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
+            method.invoke(options, 1)
+        } catch (_: Throwable) {
+            // Ignored if hidden API not accessible
+        }
         return options
     }
 

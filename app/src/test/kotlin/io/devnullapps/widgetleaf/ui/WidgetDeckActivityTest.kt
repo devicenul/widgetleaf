@@ -1,5 +1,6 @@
 package io.devnullapps.widgetleaf.ui
 
+import android.app.Activity
 import android.app.Application
 import android.appwidget.AppWidgetManager
 import android.content.Intent
@@ -7,6 +8,8 @@ import android.service.quicksettings.TileService
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.ViewGroup
+import android.view.WindowManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
@@ -14,6 +17,9 @@ import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 import io.devnullapps.widgetleaf.domain.model.WidgetCatalogItem
 import io.devnullapps.widgetleaf.services.ActiveDisplayLaunchHelper
 import io.devnullapps.widgetleaf.ui.gesture.TrackpadGestureClassifier
+import io.devnullapps.widgetleaf.ui.viewmodel.DeckUiState
+import io.devnullapps.widgetleaf.ui.viewmodel.DeckViewModel
+import io.devnullapps.widgetleaf.ui.viewmodel.PendingWidgetAction
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -658,6 +664,158 @@ class WidgetDeckActivityTest {
             }
         } finally {
             tearDownController(deckController)
+        }
+    }
+
+    @Test
+    fun configureLaunchOptions_setsLaunchDisplayId() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            val options = activity.createConfigureLaunchOptions()
+            assertThat(options.launchDisplayId).isEqualTo(ActiveDisplayLaunchHelper.getActiveDisplayId(activity))
+        } finally {
+            tearDownController(controller)
+        }
+    }
+
+    @Test
+    fun reassertOverlayPresentation_setsFullMatchParentLayoutAndScreenFlags() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            activity.reassertOverlayPresentation()
+
+            val lp = activity.window.attributes
+            assertThat(lp.width).isEqualTo(ViewGroup.LayoutParams.MATCH_PARENT)
+            assertThat(lp.height).isEqualTo(ViewGroup.LayoutParams.MATCH_PARENT)
+            val flags = lp.flags
+            assertThat((flags and WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN) != 0).isTrue()
+            assertThat((flags and WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS) != 0).isTrue()
+        } finally {
+            tearDownController(controller)
+        }
+    }
+
+    @Test
+    fun configureResult_resultOk_placesWidgetAndPreservesOverlayWithoutFinishing() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            val candidate = PlacedWidget(
+                appWidgetId = 77,
+                providerPackage = "com.config.ok",
+                providerClass = "ConfigWidget",
+                pageIndex = 0,
+                cellX = 0,
+                cellY = 0,
+                spanX = 2,
+                spanY = 2
+            )
+            activity.viewModel.markLaunchingInternalFlow(true)
+            val shadowVm = activity.viewModel
+            val requestAction = PendingWidgetAction.RequestConfigure(
+                appWidgetId = 77,
+                candidateWidget = candidate
+            )
+            val uiStateField = DeckViewModel::class.java.getDeclaredField("_uiState")
+            uiStateField.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            val mutableState = uiStateField.get(shadowVm) as kotlinx.coroutines.flow.MutableStateFlow<DeckUiState>
+            mutableState.value = mutableState.value.copy(
+                isLaunchingInternalFlow = true,
+                pendingWidgetAction = requestAction
+            )
+
+            // Deliver RESULT_OK via onActivityResult
+            val resultIntent = Intent().apply {
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 77)
+            }
+            val onActivityResultMethod = WidgetDeckActivity::class.java.getDeclaredMethod(
+                "onActivityResult",
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Intent::class.java
+            )
+            onActivityResultMethod.isAccessible = true
+            onActivityResultMethod.invoke(activity, 4042, Activity.RESULT_OK, resultIntent)
+
+            // Must NOT finish and relaunch
+            assertThat(activity.isFinishing).isFalse()
+
+            // Overlay layout and flags must be preserved
+            val lp = activity.window.attributes
+            assertThat(lp.width).isEqualTo(ViewGroup.LayoutParams.MATCH_PARENT)
+            assertThat(lp.height).isEqualTo(ViewGroup.LayoutParams.MATCH_PARENT)
+            assertThat((lp.flags and WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN) != 0).isTrue()
+
+            // Internal flow cleared and widget placed
+            assertThat(shadowVm.uiState.value.isLaunchingInternalFlow).isFalse()
+            assertThat(shadowVm.uiState.value.pendingWidgetAction).isNull()
+            val placed = shadowVm.uiState.value.widgets.find { it.appWidgetId == 77 }
+            assertThat(placed).isNotNull()
+        } finally {
+            tearDownController(controller)
+        }
+    }
+
+    @Test
+    fun configureResult_resultCanceled_preservesOverlayWithoutFinishing() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            val candidate = PlacedWidget(
+                appWidgetId = 88,
+                providerPackage = "com.config.cancel",
+                providerClass = "CancelWidget",
+                pageIndex = 0,
+                cellX = 0,
+                cellY = 0,
+                spanX = 2,
+                spanY = 2
+            )
+            val shadowVm = activity.viewModel
+            val uiStateField = DeckViewModel::class.java.getDeclaredField("_uiState")
+            uiStateField.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            val mutableState = uiStateField.get(shadowVm) as kotlinx.coroutines.flow.MutableStateFlow<DeckUiState>
+            mutableState.value = mutableState.value.copy(
+                isLaunchingInternalFlow = true,
+                pendingWidgetAction = PendingWidgetAction.RequestConfigure(88, candidate)
+            )
+
+            // Deliver RESULT_CANCELED
+            val onActivityResultMethod = WidgetDeckActivity::class.java.getDeclaredMethod(
+                "onActivityResult",
+                Int::class.javaPrimitiveType,
+                Int::class.javaPrimitiveType,
+                Intent::class.java
+            )
+            onActivityResultMethod.isAccessible = true
+            onActivityResultMethod.invoke(activity, 4042, Activity.RESULT_CANCELED, null)
+
+            // Must NOT finish
+            assertThat(activity.isFinishing).isFalse()
+
+            // Overlay flags preserved
+            val lp = activity.window.attributes
+            assertThat((lp.flags and WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN) != 0).isTrue()
+
+            // State cleaned up and widget NOT placed
+            assertThat(shadowVm.uiState.value.isLaunchingInternalFlow).isFalse()
+            assertThat(shadowVm.uiState.value.pendingWidgetAction).isNull()
+            val placed = shadowVm.uiState.value.widgets.find { it.appWidgetId == 88 }
+            assertThat(placed).isNull()
+        } finally {
+            tearDownController(controller)
         }
     }
 }
