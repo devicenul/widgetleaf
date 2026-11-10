@@ -43,6 +43,8 @@ import io.devnullapps.widgetleaf.services.ActiveDisplayLaunchHelper
 import io.devnullapps.widgetleaf.services.WidgetDeckTileService
 import io.devnullapps.widgetleaf.ui.components.DefaultFramelessWidgetContent
 import io.devnullapps.widgetleaf.ui.components.WidgetDeckOverlayScreen
+import io.devnullapps.widgetleaf.ui.gesture.TrackpadGestureClassifier
+import io.devnullapps.widgetleaf.ui.gesture.TrackpadSwipeAccumulator
 import io.devnullapps.widgetleaf.ui.hostview.DeckAppWidgetHostView
 import io.devnullapps.widgetleaf.ui.hostview.DeckWidgetHostContainer
 import io.devnullapps.widgetleaf.ui.theme.MotionSpec
@@ -66,6 +68,9 @@ class WidgetDeckActivity : ComponentActivity() {
     private var hasRequestedNotificationPermission: Boolean = false
     private var lastSecondaryClickUptimeMs: Long = -10_000L
     private var lastWidgetMutationOrFlowUptimeMs: Long = -10_000L
+    private var creationUptimeMs: Long = 0L
+    private var lastHotkeyToggleUptimeMs: Long = -10_000L
+    private val trackpadSwipeAccumulator = TrackpadSwipeAccumulator()
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -89,6 +94,11 @@ class WidgetDeckActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        creationUptimeMs = SystemClock.uptimeMillis()
+        activeInstance = this
+        val density = resources.displayMetrics.density
+        trackpadSwipeAccumulator.pageThresholdPx = 48f * density
+        trackpadSwipeAccumulator.dismissThresholdPx = 72f * density
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         viewModel = ViewModelProvider(
@@ -263,6 +273,23 @@ class WidgetDeckActivity : ComponentActivity() {
                 onSelectPage = viewModel::selectPage,
                 onPreviousPage = viewModel::navigatePreviousPage,
                 onNextPage = viewModel::navigateNextPage,
+                onSwipePrevious = viewModel::swipePreviousPage,
+                onSwipeNext = viewModel::swipeNextPage,
+                canWidgetScroll = { x, y, dirX, dirY ->
+                    val hit = findWidgetAtScreenPoint(x, y)
+                    val hostView = hit?.let { container.widgetDeckHost.getHostView(it.appWidgetId) }
+                    if (hostView != null) {
+                        val canH = if (dirX != 0) hostView.canChildScrollHorizontally(dirX) else false
+                        val canV = if (dirY != 0) hostView.canChildScrollVertically(dirY) else false
+                        canH || canV
+                    } else {
+                        false
+                    }
+                },
+                onCancelChildTouches = { x, y ->
+                    val hit = findWidgetAtScreenPoint(x, y)
+                    hit?.let { container.widgetDeckHost.getHostView(it.appWidgetId)?.cancelChildTouches() }
+                },
                 onOpenWidgetPicker = viewModel::openWidgetPicker,
                 onCloseWidgetPicker = viewModel::closeWidgetPicker,
                 onSearchQueryChange = viewModel::updateWidgetSearchQuery,
@@ -414,6 +441,16 @@ class WidgetDeckActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        val now = SystemClock.uptimeMillis()
+        if (intent.action == ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK ||
+            intent.action == Intent.ACTION_ASSIST
+        ) {
+            if (now - lastHotkeyToggleUptimeMs >= 350L) {
+                lastHotkeyToggleUptimeMs = now
+                finishWithoutAnimation()
+            }
+            return
+        }
         handleIncomingIntent(intent, isNewIntentWhileVisible = wasAlreadyResumed)
     }
 
@@ -437,11 +474,14 @@ class WidgetDeckActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        activeInstance = this
         container.widgetHostGateway.startListening()
     }
 
     override fun onResume() {
         super.onResume()
+        activeInstance = this
+        isDeckVisible = true
         wasAlreadyResumed = true
         if (::viewModel.isInitialized && viewModel.uiState.value.pendingWidgetAction == null) {
             viewModel.markLaunchingInternalFlow(false)
@@ -449,6 +489,7 @@ class WidgetDeckActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        isDeckVisible = false
         wasAlreadyResumed = false
         super.onPause()
     }
@@ -466,11 +507,19 @@ class WidgetDeckActivity : ComponentActivity() {
 
     override fun onStop() {
         container.widgetHostGateway.stopListening()
+        if (activeInstance === this) {
+            activeInstance = null
+        }
+        isDeckVisible = false
         super.onStop()
     }
 
     override fun onDestroy() {
         container.blurController.detachFromWindow(window)
+        if (activeInstance === this) {
+            activeInstance = null
+        }
+        isDeckVisible = false
         super.onDestroy()
     }
 
@@ -535,6 +584,54 @@ class WidgetDeckActivity : ComponentActivity() {
             // does not convert an unhandled right-click / two-finger click into KEYCODE_BACK!
             return true
         }
+
+        if (::viewModel.isInitialized) {
+            val state = viewModel.uiState.value
+            // Feature 4: All swipe gestures DISABLED while a widget is in edit mode
+            if (state.editingWidgetId == null &&
+                !state.isWidgetPickerOpen &&
+                !state.isOverlaySettingsOpen &&
+                state.contextMenuPosition == null
+            ) {
+                if (TrackpadGestureClassifier.isTrackpadSwipe(ev)) {
+                    val deltas = TrackpadGestureClassifier.extractScrollDeltas(ev)
+                    val hitWidget = findWidgetAtScreenPoint(ev.x, ev.y)
+                    val hostView = hitWidget?.let { container.widgetDeckHost.getHostView(it.appWidgetId) }
+
+                    val result = trackpadSwipeAccumulator.onTrackpadEvent(
+                        dx = deltas.dx,
+                        dy = deltas.dy,
+                        uptimeMs = ev.eventTime,
+                        canScrollX = { dir -> hostView?.canChildScrollHorizontally(dir) == true },
+                        canScrollY = { dir -> hostView?.canChildScrollVertically(dir) == true }
+                    )
+
+                    when (result) {
+                        TrackpadSwipeAccumulator.SwipeResult.PAGE_NEXT -> {
+                            viewModel.swipeNextPage()
+                            return true
+                        }
+                        TrackpadSwipeAccumulator.SwipeResult.PAGE_PREVIOUS -> {
+                            viewModel.swipePreviousPage()
+                            return true
+                        }
+                        TrackpadSwipeAccumulator.SwipeResult.DISMISS -> {
+                            finishWithoutAnimation()
+                            return true
+                        }
+                        TrackpadSwipeAccumulator.SwipeResult.NONE -> {
+                            if (deltas.dx != 0f || deltas.dy != 0f) {
+                                if (hostView != null) {
+                                    return super.dispatchGenericMotionEvent(ev)
+                                }
+                                return true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         return super.dispatchGenericMotionEvent(ev)
     }
 
@@ -591,7 +688,16 @@ class WidgetDeckActivity : ComponentActivity() {
             }
 
             if (!isTypingText && !state.isOverlaySettingsOpen && state.settings.matchesKeyEvent(event)) {
-                finishWithoutAnimation()
+                val now = SystemClock.uptimeMillis()
+                if (now - lastHotkeyToggleUptimeMs >= 350L) {
+                    lastHotkeyToggleUptimeMs = now
+                    finishWithoutAnimation()
+                }
+                return true
+            }
+
+            // Key repeats or releases of the hotkey must never fall through to dismiss on other keys
+            if (event.keyCode == state.settings.hotkeyKeyCode) {
                 return true
             }
 
@@ -673,7 +779,10 @@ class WidgetDeckActivity : ComponentActivity() {
 
                 // Dismiss the overlay when pressing any other non-WidgetLeaf key (e.g. Space, A..Z, =, etc.)
                 if (!isNonDismissingHardwareOrFocusKey(event.keyCode)) {
-                    finishWithoutAnimation()
+                    val sinceCreatedMs = SystemClock.uptimeMillis() - creationUptimeMs
+                    if (sinceCreatedMs >= 300L) {
+                        finishWithoutAnimation()
+                    }
                     return true
                 }
             }
@@ -694,5 +803,10 @@ class WidgetDeckActivity : ComponentActivity() {
     companion object {
         private const val REQUEST_CODE_CONFIGURE_WIDGET = 4042
         var testContainerOverride: AppContainer? = null
+
+        var activeInstance: WidgetDeckActivity? = null
+            internal set
+        var isDeckVisible: Boolean = false
+            internal set
     }
 }

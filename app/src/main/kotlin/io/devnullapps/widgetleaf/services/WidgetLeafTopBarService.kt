@@ -15,6 +15,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.Gravity
 import android.view.KeyEvent
@@ -28,6 +29,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import io.devnullapps.widgetleaf.R
 import io.devnullapps.widgetleaf.domain.model.OverlaySettings
+import io.devnullapps.widgetleaf.ui.WidgetDeckActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -58,6 +60,7 @@ class WidgetLeafTopBarService : AccessibilityService() {
     private var iconView: ImageView? = null
     internal var layoutParams: WindowManager.LayoutParams? = null
     private var isWindowAttached = false
+    private var lastHotkeyToggleUptimeMs: Long = -10_000L
 
     private val rescanRunnable = Runnable {
         refreshTopBarPlacement()
@@ -102,10 +105,21 @@ class WidgetLeafTopBarService : AccessibilityService() {
 
     public override fun onKeyEvent(event: KeyEvent): Boolean {
         if (currentSettings.matchesKeyEvent(event)) {
-            ActiveDisplayLaunchHelper.launchOverlay(
-                this,
-                ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
-            )
+            val now = SystemClock.uptimeMillis()
+            if (now - lastHotkeyToggleUptimeMs < 350L) {
+                return true
+            }
+            lastHotkeyToggleUptimeMs = now
+
+            val active = WidgetDeckActivity.activeInstance
+            if (active != null && !active.isFinishing && WidgetDeckActivity.isDeckVisible) {
+                active.finish()
+            } else {
+                ActiveDisplayLaunchHelper.launchOverlay(
+                    this,
+                    ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
+                )
+            }
             return true
         }
         return false
