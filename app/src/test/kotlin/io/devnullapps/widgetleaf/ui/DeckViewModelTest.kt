@@ -989,6 +989,47 @@ class DeckViewModelTest {
         // Sizes re-synced via gateway
         assertTrue(fakeGateway.updatedSizes.containsKey(1))
         assertTrue(fakeGateway.updatedSizes.containsKey(2))
+
+        // Display-only reflow: persisted repository state was NOT written automatically!
+        assertEquals(listOf(w1, w2), fakeRepository.widgets)
+        assertEquals(5, fakeRepository.widgets.first { it.appWidgetId == 2 }.cellX)
+
+        // Grow back to initial 8x6 profile: original positions restored!
+        viewModel.updateGridProfile(initialProfile)
+        val restoredWidgets = viewModel.uiState.value.widgets
+        val restoredW2 = restoredWidgets.first { it.appWidgetId == 2 }
+        assertEquals(5, restoredW2.cellX)
+        assertEquals(0, restoredW2.cellY)
+    }
+
+    @Test
+    fun updateGridProfile_degenerateMeasurements_ignored() = runTest(testDispatcher) {
+        val initialProfile = DesktopGridProfile(columns = 8, rows = 6)
+        viewModel.updateGridProfile(initialProfile)
+
+        // Degenerate measurements: 0 columns, 0 rows, 0 available dimensions
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 0, rows = 0))
+        assertEquals(initialProfile, viewModel.uiState.value.gridProfile)
+
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 8, rows = 6, availableWidthDp = 5f))
+        assertEquals(initialProfile, viewModel.uiState.value.gridProfile)
+
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 8, rows = 6, cellWidthDp = 0f))
+        assertEquals(initialProfile, viewModel.uiState.value.gridProfile)
+    }
+
+    @Test
+    fun updateGridProfile_unchangedProfile_isNoOp() = runTest(testDispatcher) {
+        val initialProfile = DesktopGridProfile(columns = 8, rows = 6)
+        viewModel.updateGridProfile(initialProfile)
+
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1))
+        fakeGateway.updatedSizes.clear()
+
+        // Calling with the same profile does not re-sync or modify state
+        viewModel.updateGridProfile(initialProfile)
+        assertTrue(fakeGateway.updatedSizes.isEmpty())
     }
 
     private fun createCatalogItem(pkg: String, label: String, spanX: Int, spanY: Int) = WidgetCatalogItem(

@@ -64,7 +64,7 @@ fun WidgetDeckOverlayScreen(
         val heightDp = maxHeight.value
 
         LaunchedEffect(widthDp, heightDp, uiState.settings.useCenteredBentoCanvas) {
-            if (widthDp > 0f && heightDp > 0f) {
+            if (widthDp > 10f && heightDp > 10f) {
                 val newProfile = DesktopGridProfileResolver.resolve(
                     screenWidthDp = widthDp,
                     screenHeightDp = heightDp,

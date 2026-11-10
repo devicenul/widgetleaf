@@ -51,6 +51,8 @@ class DeckViewModel(
     private var isFirstWidgetsEmission: Boolean = true
     private var lastSyncedProfile: DesktopGridProfile? = null
     private val lastSyncedWidgetSpans = mutableMapOf<Int, Pair<Int, Int>>()
+    private var rawPersistedWidgets: List<PlacedWidget> = emptyList()
+    private var rawPersistedPages: List<DeckPage> = listOf(DeckPage(pageIndex = 0, customLabel = null))
 
     private fun syncWidgetSizes(widget: PlacedWidget, profile: DesktopGridProfile) {
         val sizes = calculateResponsiveSizesUseCase(widget.spanX, widget.spanY, profile)
@@ -68,15 +70,23 @@ class DeckViewModel(
     init {
         viewModelScope.launch {
             repository.pagesFlow.collect { pages ->
+                val safePages = pages.ifEmpty { listOf(DeckPage(pageIndex = 0, customLabel = null)) }
+                rawPersistedPages = safePages
+                val profile = _uiState.value.gridProfile
+                val (displayedPages, displayedWidgets) = deriveDisplayedState(
+                    rawPersistedWidgets,
+                    rawPersistedPages,
+                    profile
+                )
                 _uiState.update { current ->
-                    val safePages = pages.ifEmpty { listOf(DeckPage(pageIndex = 0, customLabel = null)) }
-                    val clampedIndex = if (current.activePageIndex in safePages.indices) {
+                    val clampedIndex = if (current.activePageIndex in displayedPages.indices) {
                         current.activePageIndex
                     } else {
-                        (safePages.size - 1).coerceAtLeast(0)
+                        (displayedPages.size - 1).coerceAtLeast(0)
                     }
                     current.copy(
-                        pages = safePages,
+                        pages = displayedPages,
+                        widgets = displayedWidgets,
                         activePageIndex = clampedIndex
                     )
                 }
@@ -85,18 +95,24 @@ class DeckViewModel(
 
         viewModelScope.launch {
             repository.widgetsFlow.collect { widgets ->
+                rawPersistedWidgets = widgets
                 val profile = _uiState.value.gridProfile
+                val (displayedPages, displayedWidgets) = deriveDisplayedState(
+                    rawPersistedWidgets,
+                    rawPersistedPages,
+                    profile
+                )
                 if (isFirstWidgetsEmission) {
                     if (widgets.isNotEmpty()) {
                         isFirstWidgetsEmission = false
                     }
                     lastSyncedProfile = profile
-                    for (w in widgets) {
+                    for (w in displayedWidgets) {
                         syncWidgetSizes(w, profile)
                     }
                 } else {
                     val profileChanged = profile != lastSyncedProfile
-                    for (w in widgets) {
+                    for (w in displayedWidgets) {
                         val previousSpan = lastSyncedWidgetSpans[w.appWidgetId]
                         val isNew = previousSpan == null
                         val spanChanged = previousSpan != Pair(w.spanX, w.spanY)
@@ -104,14 +120,17 @@ class DeckViewModel(
                             syncWidgetSizes(w, profile)
                         }
                     }
-                    val currentIds = widgets.map { it.appWidgetId }.toSet()
+                    val currentIds = displayedWidgets.map { it.appWidgetId }.toSet()
                     lastSyncedWidgetSpans.keys.retainAll(currentIds)
                     if (profileChanged) {
                         lastSyncedProfile = profile
                     }
                 }
                 _uiState.update { current ->
-                    current.copy(widgets = widgets)
+                    current.copy(
+                        widgets = displayedWidgets,
+                        pages = displayedPages
+                    )
                 }
             }
         }
@@ -980,11 +999,45 @@ class DeckViewModel(
     }
 
     fun updateGridProfile(profile: DesktopGridProfile) {
-        val currentWidgets = _uiState.value.widgets
-        val currentPages = _uiState.value.pages
+        if (profile == _uiState.value.gridProfile) return
+        if (profile.columns <= 0 || profile.rows <= 0 ||
+            profile.cellWidthDp <= 10f || profile.cellHeightDp <= 10f ||
+            profile.availableWidthDp <= 10f || profile.availableHeightDp <= 10f) {
+            return
+        }
 
-        // Check if existing widgets need reflow (if columns or rows shrunk and any widget is out-of-bounds or overlapping)
-        val needsReflow = currentWidgets.any { w ->
+        val (displayedPages, displayedWidgets) = deriveDisplayedState(
+            rawPersistedWidgets,
+            rawPersistedPages,
+            profile
+        )
+
+        val safeActivePageIndex = if (_uiState.value.activePageIndex in displayedPages.indices) {
+            _uiState.value.activePageIndex
+        } else {
+            (displayedPages.size - 1).coerceAtLeast(0)
+        }
+
+        _uiState.update {
+            it.copy(
+                gridProfile = profile,
+                widgets = displayedWidgets,
+                pages = displayedPages,
+                activePageIndex = safeActivePageIndex
+            )
+        }
+        lastSyncedProfile = profile
+        for (w in displayedWidgets) {
+            syncWidgetSizes(w, profile)
+        }
+    }
+
+    private fun deriveDisplayedState(
+        widgets: List<PlacedWidget>,
+        pages: List<DeckPage>,
+        profile: DesktopGridProfile
+    ): Pair<List<DeckPage>, List<PlacedWidget>> {
+        val needsReflow = widgets.any { w ->
             w.cellX + w.spanX > profile.columns ||
             w.cellY + w.spanY > profile.rows ||
             w.spanX > profile.columns ||
@@ -992,33 +1045,22 @@ class DeckViewModel(
         }
 
         val reflowedWidgets = if (needsReflow) {
-            reflowWidgetsToFitGrid(currentWidgets, currentPages, profile)
+            reflowWidgetsToFitGrid(widgets, pages, profile)
         } else {
-            currentWidgets
+            widgets
         }
 
-        val newPageCount = maxOf(currentPages.size, (reflowedWidgets.maxOfOrNull { it.pageIndex } ?: 0) + 1)
-        val reflowedPages = if (newPageCount > currentPages.size) {
-            val extended = currentPages.toMutableList()
-            for (p in currentPages.size until newPageCount) {
+        val newPageCount = maxOf(pages.size, (reflowedWidgets.maxOfOrNull { it.pageIndex } ?: 0) + 1)
+        val reflowedPages = if (newPageCount > pages.size) {
+            val extended = pages.toMutableList()
+            for (p in pages.size until newPageCount) {
                 extended.add(DeckPage(pageIndex = p, customLabel = null))
             }
             extended
         } else {
-            currentPages
+            pages
         }
-
-        _uiState.update { it.copy(gridProfile = profile, widgets = reflowedWidgets, pages = reflowedPages) }
-        lastSyncedProfile = profile
-        for (w in reflowedWidgets) {
-            syncWidgetSizes(w, profile)
-        }
-
-        if (needsReflow && reflowedWidgets != currentWidgets) {
-            viewModelScope.launch {
-                repository.replaceDeckState(pages = reflowedPages, widgets = reflowedWidgets)
-            }
-        }
+        return Pair(reflowedPages, reflowedWidgets)
     }
 
     private fun reflowWidgetsToFitGrid(

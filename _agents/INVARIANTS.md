@@ -106,5 +106,5 @@
 - **Rule:**
   1. `DesktopGridProfileResolver` MUST stretch columns and cell width to use the full available width, computing symmetric horizontal margins as `(availableWidth - totalGridWidth) / 2f` so `leftMargin == rightMargin` exactly across all displays (portrait, 1024×640, 1280×800, 1920×1080, and ultrawide).
   2. `WidgetDeckOverlayScreen` uses `BoxWithConstraints` to dynamically provide true Compose dp width/height to `updateGridProfile`.
-  3. `DeckViewModel.updateGridProfile` MUST keep existing widget positions stationary when columns grow, and clamp/reflow out-of-bounds widgets without overlaps when columns shrink, re-syncing responsive sizes for all widgets.
+  3. `DeckViewModel.updateGridProfile` MUST keep existing widget positions stationary when columns grow, and reflow out-of-bounds widgets for display only when columns/rows shrink without writing to the repository, allowing original positions to restore when the grid expands; the persisted layout is modified only on explicit user commit (move, resize, drop, remove). Degenerate measurements (<= 10dp or 0) and unchanged profiles are ignored. Responsive sizes are re-synced for displayed widgets.
 
