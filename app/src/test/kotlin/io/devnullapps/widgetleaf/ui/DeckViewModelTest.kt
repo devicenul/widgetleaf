@@ -266,6 +266,157 @@ class DeckViewModelTest {
         assertEquals(0, newPlaced.cellY)
     }
 
+    @Test
+    fun addWidgetAutoPlace_activePageFull_placedOnNextPageWithSpace() = runTest {
+        // Grid 2x2. Page 0 full, Page 1 empty.
+        val tinyProfile = DesktopGridProfile(columns = 2, rows = 2)
+        viewModel.updateGridProfile(tinyProfile)
+
+        val existingP0 = PlacedWidget(
+            appWidgetId = 50,
+            providerPackage = "com.p0",
+            providerClass = "W0",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2
+        )
+        fakeRepository.setWidgets(listOf(existingP0))
+        fakeRepository.setPages(listOf(DeckPage(0), DeckPage(1)))
+        viewModel.selectPage(0)
+
+        val newItem = createCatalogItem("com.p1", "W1", 2, 2)
+        viewModel.addWidgetAutoPlace(newItem)
+
+        // Must be placed on existing Page 1 (not creating a 3rd page)
+        assertEquals(2, viewModel.uiState.value.pages.size)
+        // User must be navigated to Page 1 where it was placed
+        assertEquals(1, viewModel.uiState.value.activePageIndex)
+
+        val existingAfter = viewModel.uiState.value.widgets.find { it.appWidgetId == 50 }
+        assertNotNull(existingAfter)
+        assertEquals(0, existingAfter!!.pageIndex)
+        assertEquals(0, existingAfter.cellX)
+        assertEquals(0, existingAfter.cellY)
+
+        val newPlaced = viewModel.uiState.value.widgets.find { it.providerPackage == "com.p1" }
+        assertNotNull(newPlaced)
+        assertEquals(1, newPlaced!!.pageIndex)
+        assertEquals(0, newPlaced.cellX)
+        assertEquals(0, newPlaced.cellY)
+    }
+
+    @Test
+    fun addWidgetAutoPlace_allPagesFull_createsNewPageAppendedAtEnd() = runTest {
+        // Grid 2x2. Page 0 full and Page 1 full.
+        val tinyProfile = DesktopGridProfile(columns = 2, rows = 2)
+        viewModel.updateGridProfile(tinyProfile)
+
+        val existingP0 = PlacedWidget(appWidgetId = 50, providerPackage = "com.p0", providerClass = "W0", pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val existingP1 = PlacedWidget(appWidgetId = 51, providerPackage = "com.p1", providerClass = "W1", pageIndex = 1, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(existingP0, existingP1))
+        fakeRepository.setPages(listOf(DeckPage(0), DeckPage(1)))
+        viewModel.selectPage(0)
+
+        val newItem = createCatalogItem("com.p2", "W2", 2, 2)
+        viewModel.addWidgetAutoPlace(newItem)
+
+        // Appends brand new page at index 2
+        assertEquals(3, viewModel.uiState.value.pages.size)
+        assertEquals(2, viewModel.uiState.value.activePageIndex)
+
+        // Existing widgets on Page 0 and 1 must NOT have moved
+        val w0 = viewModel.uiState.value.widgets.find { it.appWidgetId == 50 }!!
+        assertEquals(0, w0.pageIndex)
+        assertEquals(0, w0.cellX)
+        assertEquals(0, w0.cellY)
+
+        val w1 = viewModel.uiState.value.widgets.find { it.appWidgetId == 51 }!!
+        assertEquals(1, w1.pageIndex)
+        assertEquals(0, w1.cellX)
+        assertEquals(0, w1.cellY)
+
+        val w2 = viewModel.uiState.value.widgets.find { it.providerPackage == "com.p2" }!!
+        assertEquals(2, w2.pageIndex)
+        assertEquals(0, w2.cellX)
+        assertEquals(0, w2.cellY)
+    }
+
+    @Test
+    fun addWidgetAutoPlace_partiallyFullPage_placedInFreeSpotWithoutMovingAnything() = runTest {
+        // Grid 4x4. Page 0 has a 2x2 widget at (0, 0).
+        val profile = DesktopGridProfile(columns = 4, rows = 4)
+        viewModel.updateGridProfile(profile)
+
+        val existing = PlacedWidget(appWidgetId = 10, providerPackage = "com.stay", providerClass = "Stay", pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(existing))
+        fakeRepository.setPages(listOf(DeckPage(0)))
+
+        val newItem = createCatalogItem("com.new", "NewWidget", 2, 2)
+        viewModel.addWidgetAutoPlace(newItem)
+
+        assertEquals(1, viewModel.uiState.value.pages.size)
+        assertEquals(0, viewModel.uiState.value.activePageIndex)
+
+        // Existing widget at (0, 0) is unmoved
+        val stayAfter = viewModel.uiState.value.widgets.find { it.appWidgetId == 10 }!!
+        assertEquals(0, stayAfter.pageIndex)
+        assertEquals(0, stayAfter.cellX)
+        assertEquals(0, stayAfter.cellY)
+
+        // New widget placed in free spot in column-major order: (0, 2)
+        val newPlaced = viewModel.uiState.value.widgets.find { it.providerPackage == "com.new" }!!
+        assertEquals(0, newPlaced.pageIndex)
+        assertEquals(0, newPlaced.cellX)
+        assertEquals(2, newPlaced.cellY)
+    }
+
+    @Test
+    fun dropCatalogWidgetAtCell_dropOnOccupiedCell_noDisplacement() = runTest {
+        // Grid 4x4. Page 0 has an existing widget at (0, 0) span 2x2.
+        val profile = DesktopGridProfile(columns = 4, rows = 4)
+        viewModel.updateGridProfile(profile)
+
+        val existing = PlacedWidget(appWidgetId = 20, providerPackage = "com.fixed", providerClass = "Fixed", pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(existing))
+        fakeRepository.setPages(listOf(DeckPage(0)))
+
+        val newItem = createCatalogItem("com.dropped", "Dropped", 2, 2)
+        // Explicitly drop onto the occupied cell (0, 0)
+        viewModel.dropCatalogWidgetAtCell(newItem, pageIndex = 0, cellX = 0, cellY = 0)
+
+        // Existing widget at (0, 0) must NOT be displaced!
+        val existingAfter = viewModel.uiState.value.widgets.find { it.appWidgetId == 20 }!!
+        assertEquals(0, existingAfter.pageIndex)
+        assertEquals(0, existingAfter.cellX)
+        assertEquals(0, existingAfter.cellY)
+        assertEquals(2, existingAfter.spanX)
+        assertEquals(2, existingAfter.spanY)
+
+        // The dropped widget is placed at the first available free spot on that page: (0, 2)
+        val droppedPlaced = viewModel.uiState.value.widgets.find { it.providerPackage == "com.dropped" }!!
+        assertEquals(0, droppedPlaced.pageIndex)
+        assertEquals(0, droppedPlaced.cellX)
+        assertEquals(2, droppedPlaced.cellY)
+        assertEquals(2, droppedPlaced.spanX)
+        assertEquals(2, droppedPlaced.spanY)
+    }
+
+    @Test
+    fun dropCatalogWidgetAtCell_dropOnFreeCell_placedAtDroppedCell() = runTest {
+        val profile = DesktopGridProfile(columns = 4, rows = 4)
+        viewModel.updateGridProfile(profile)
+
+        val newItem = createCatalogItem("com.dropped.free", "DroppedFree", 2, 2)
+        viewModel.dropCatalogWidgetAtCell(newItem, pageIndex = 0, cellX = 2, cellY = 2)
+
+        val placed = viewModel.uiState.value.widgets.find { it.providerPackage == "com.dropped.free" }!!
+        assertEquals(0, placed.pageIndex)
+        assertEquals(2, placed.cellX)
+        assertEquals(2, placed.cellY)
+    }
+
     // --- 5. Widget Bind & Configure State Machine ---
 
     @Test

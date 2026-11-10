@@ -334,42 +334,91 @@ class DeckViewModel(
 
     // --- Widget Placement ---
 
-    fun addWidgetAutoPlace(item: WidgetCatalogItem) {
-        val profile = _uiState.value.gridProfile
-        val activePage = _uiState.value.activePageIndex
-        val activeWidgets = _uiState.value.activePageWidgets
+    data class NewWidgetPlacement(
+        val pageIndex: Int,
+        val cellX: Int,
+        val cellY: Int
+    )
 
-        val spot = gridCollisionResolver.findFirstAvailableSpot(
-            spanX = item.defaultSpanX,
-            spanY = item.defaultSpanY,
-            existingOnPage = activeWidgets,
+    /**
+     * Finds a free spot for a newly added widget without displacing existing widgets.
+     * USER RULE (v0.0.4 Fix 1): When adding a NEW widget (catalog picker auto-place or catalog drag-drop),
+     * if it cannot fit in free space on the target page, do NOT displace existing widgets:
+     * 1. Start page ([startPageIndex], active page or target drop page)
+     * 2. Subsequent pages in order ([startPageIndex + 1] until pages.size)
+     * 3. A brand new page appended at the end (index = pages.size, cell = 0, 0)
+     *
+     * Order of scanning within any page is COLUMN-MAJOR (downward within a column, then right),
+     * consistent with cascade resolution.
+     */
+    private fun findSpotForNewWidget(
+        spanX: Int,
+        spanY: Int,
+        startPageIndex: Int,
+        currentPages: List<DeckPage>,
+        allWidgets: List<PlacedWidget>,
+        profile: DesktopGridProfile
+    ): NewWidgetPlacement {
+        val clampedSpanX = spanX.coerceIn(1, profile.columns)
+        val clampedSpanY = spanY.coerceIn(1, profile.rows)
+
+        // 1. Check start page first
+        val safeStartPage = startPageIndex.coerceAtLeast(0)
+        val widgetsOnStartPage = allWidgets.filter { it.pageIndex == safeStartPage }
+        val startSpot = gridCollisionResolver.findFirstAvailableSpot(
+            spanX = clampedSpanX,
+            spanY = clampedSpanY,
+            existingOnPage = widgetsOnStartPage,
             columns = profile.columns,
             rows = profile.rows
         )
-
-        val targetPageIndex: Int
-        val targetCellX: Int
-        val targetCellY: Int
-
-        if (spot != null) {
-            targetPageIndex = activePage
-            targetCellX = spot.first
-            targetCellY = spot.second
-        } else {
-            // Active page is full -> dynamically place onto new page at (0, 0)
-            targetPageIndex = _uiState.value.pages.size
-            targetCellX = 0
-            targetCellY = 0
+        if (startSpot != null) {
+            return NewWidgetPlacement(safeStartPage, startSpot.first, startSpot.second)
         }
+
+        // 2. Check subsequent pages in order
+        for (p in (safeStartPage + 1) until currentPages.size) {
+            val widgetsOnPage = allWidgets.filter { it.pageIndex == p }
+            val nextSpot = gridCollisionResolver.findFirstAvailableSpot(
+                spanX = clampedSpanX,
+                spanY = clampedSpanY,
+                existingOnPage = widgetsOnPage,
+                columns = profile.columns,
+                rows = profile.rows
+            )
+            if (nextSpot != null) {
+                return NewWidgetPlacement(p, nextSpot.first, nextSpot.second)
+            }
+        }
+
+        // 3. All checked pages full -> append a new page at the end
+        val newPageIndex = currentPages.size
+        return NewWidgetPlacement(newPageIndex, 0, 0)
+    }
+
+    fun addWidgetAutoPlace(item: WidgetCatalogItem) {
+        val profile = _uiState.value.gridProfile
+        val activePage = _uiState.value.activePageIndex
+        val currentPages = _uiState.value.pages
+        val allWidgets = _uiState.value.widgets
+
+        val placement = findSpotForNewWidget(
+            spanX = item.defaultSpanX,
+            spanY = item.defaultSpanY,
+            startPageIndex = activePage,
+            currentPages = currentPages,
+            allWidgets = allWidgets,
+            profile = profile
+        )
 
         val appWidgetId = widgetHostGateway.allocateAppWidgetId()
         val candidate = PlacedWidget(
             appWidgetId = appWidgetId,
             providerPackage = item.providerPackage,
             providerClass = item.providerClass,
-            pageIndex = targetPageIndex,
-            cellX = targetCellX,
-            cellY = targetCellY,
+            pageIndex = placement.pageIndex,
+            cellX = placement.cellX,
+            cellY = placement.cellY,
             spanX = item.defaultSpanX,
             spanY = item.defaultSpanY,
             minSpanX = item.minSpanX,
@@ -395,16 +444,42 @@ class DeckViewModel(
         cellY: Int
     ) {
         val profile = _uiState.value.gridProfile
+        val currentPages = _uiState.value.pages
+        val allWidgets = _uiState.value.widgets
+
+        val effectiveSpanX = item.defaultSpanX.coerceIn(1, profile.columns)
+        val effectiveSpanY = item.defaultSpanY.coerceIn(1, profile.rows)
+        val clampedCellX = cellX.coerceIn(0, (profile.columns - effectiveSpanX).coerceAtLeast(0))
+        val clampedCellY = cellY.coerceIn(0, (profile.rows - effectiveSpanY).coerceAtLeast(0))
+        val targetBounds = GridBounds(clampedCellX, clampedCellY, effectiveSpanX, effectiveSpanY)
+
+        val widgetsOnTargetPage = allWidgets.filter { it.pageIndex == pageIndex }
+        val overlaps = widgetsOnTargetPage.any { it.bounds.intersects(targetBounds) }
+
+        val placement = if (!overlaps) {
+            NewWidgetPlacement(pageIndex, clampedCellX, clampedCellY)
+        } else {
+            // Explicit drop onto occupied cell -> also no displacement!
+            // If the dropped spot overlaps, place at the first free spot on that page,
+            // else next page with space / new page
+            findSpotForNewWidget(
+                spanX = effectiveSpanX,
+                spanY = effectiveSpanY,
+                startPageIndex = pageIndex,
+                currentPages = currentPages,
+                allWidgets = allWidgets,
+                profile = profile
+            )
+        }
+
         val appWidgetId = widgetHostGateway.allocateAppWidgetId()
-        val clampedCellX = cellX.coerceIn(0, (profile.columns - item.defaultSpanX).coerceAtLeast(0))
-        val clampedCellY = cellY.coerceIn(0, (profile.rows - item.defaultSpanY).coerceAtLeast(0))
         val candidate = PlacedWidget(
             appWidgetId = appWidgetId,
             providerPackage = item.providerPackage,
             providerClass = item.providerClass,
-            pageIndex = pageIndex,
-            cellX = clampedCellX,
-            cellY = clampedCellY,
+            pageIndex = placement.pageIndex,
+            cellX = placement.cellX,
+            cellY = placement.cellY,
             spanX = item.defaultSpanX,
             spanY = item.defaultSpanY,
             minSpanX = item.minSpanX,
@@ -416,23 +491,7 @@ class DeckViewModel(
             label = item.widgetLabel
         )
 
-        val allWidgets = _uiState.value.widgets
-        val effectivePageCount = maxOf(_uiState.value.pages.size, pageIndex + 1)
-        val result = cascadeDisplacementResolver.resolve(
-            dragged = candidate,
-            allWidgets = allWidgets,
-            columns = profile.columns,
-            rows = profile.rows,
-            pageCount = effectivePageCount
-        )
-
-        if (result == null) {
-            widgetHostGateway.deleteAppWidgetId(appWidgetId)
-            _uiState.update { it.copy(draggingCatalogItem = null) }
-            return
-        }
-
-        proceedWidgetPlacement(candidate, result.widgets, result.pageCount)
+        proceedWidgetPlacement(candidate)
     }
 
     private fun proceedWidgetPlacement(

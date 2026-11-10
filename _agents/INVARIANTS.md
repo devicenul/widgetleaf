@@ -143,4 +143,18 @@
   4. **Edit Mode Guard:** All touch and trackpad swipe gestures are strictly disabled whenever any widget is in edit mode (`editingWidgetId != null`).
   5. **Consistent Hotkey Toggle & Debounce:** Pressing the global hotkey combo (default `Alt + W`), clicking the top status bar leaf pill, or triggering `ToggleDeckShortcutActivity` toggles the overlay: visible → dismiss; hidden → open. Debounces key repeats (350 ms). Non-navigation key dismissal is suppressed during the initial 300 ms after creation and on the hotkey keyCode itself, preventing key release races from dismissing newly opened windows.
 
+### INV-19: New Widget Non-Displacement Placement Rule
+- **Why:** Adding a new widget to an existing page must never unexpectedly shove, cascade, or scatter existing widgets across columns or pages. Users expect their arranged layouts to remain stable when exploring or placing new widgets.
+- **Rule:**
+  1. **Zero Displacement on Add:** When adding a NEW widget (catalog picker auto-place via `DeckViewModel.addWidgetAutoPlace` or catalog drag-drop via `DeckViewModel.dropCatalogWidgetAtCell`), if it cannot fit in free space on the target page, existing widgets MUST NOT be displaced.
+  2. **Deterministic Page Search Order:** The system searches for free space in the following order:
+     - Active / target page first;
+     - Subsequent pages in order (`(activePage + 1) until pages.size`);
+     - A brand new page appended at the end (`index = pages.size, cell = 0, 0`).
+  3. **Column-Major Search Order:** Within every page, available spots are evaluated in COLUMN-MAJOR order (downward within column $x$, then next column $x+1$ right), consistent with `CascadeDisplacementResolver`.
+  4. **Occupied Drop Fallback:** Explicit catalog drag-drop onto an occupied cell never displaces existing widgets; if the dropped cell overlaps an existing widget, it places into the first free spot on that page, else the next page with space, else a new page.
+  5. **Auto-Navigation:** The overlay automatically navigates to the page where the new widget was placed (`activePageIndex = candidate.pageIndex`) so the user immediately sees it.
+  6. **Existing Widgets Cascade:** Moving and resizing *existing* placed widgets continues to use `CascadeDisplacementResolver`.
+
+
 

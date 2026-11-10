@@ -5,6 +5,11 @@ import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 
 class GridCollisionResolver {
 
+    /**
+     * Finds the first available spot for a widget of size [spanX] x [spanY] among [existingOnPage]
+     * using COLUMN-MAJOR order (downward first within a column, then next column right),
+     * consistent with the cascade displacement order in [CascadeDisplacementResolver].
+     */
     fun findFirstAvailableSpot(
         spanX: Int,
         spanY: Int,
@@ -12,8 +17,9 @@ class GridCollisionResolver {
         columns: Int,
         rows: Int
     ): Pair<Int, Int>? {
-        for (y in 0..(rows - spanY)) {
-            for (x in 0..(columns - spanX)) {
+        if (spanX > columns || spanY > rows) return null
+        for (x in 0..(columns - spanX)) {
+            for (y in 0..(rows - spanY)) {
                 val bounds = GridBounds(cellX = x, cellY = y, spanX = spanX, spanY = spanY)
                 val hasOverlap = existingOnPage.any { it.bounds.intersects(bounds) }
                 if (!hasOverlap) {

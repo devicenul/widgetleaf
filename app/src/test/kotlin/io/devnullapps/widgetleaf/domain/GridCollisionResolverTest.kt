@@ -29,9 +29,9 @@ class GridCollisionResolverTest {
     )
 
     @Test
-    fun findFirstAvailableSpot_findsFirstEmptySpotRowByRow() {
+    fun findFirstAvailableSpot_findsFirstEmptySpotColumnByColumn() {
         val w1 = createWidget(id = 1, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
-        // Grid 4x4. Row 0 has x=0,1 occupied. Spot (2,0) for 2x2 is free!
+        // Grid 4x4. Column 0 has x=0,1 y=0,1 occupied. In column-major order, spot (0, 2) for 2x2 is free!
         val spot = resolver.findFirstAvailableSpot(
             spanX = 2,
             spanY = 2,
@@ -39,11 +39,11 @@ class GridCollisionResolverTest {
             columns = 4,
             rows = 4
         )
-        assertEquals(Pair(2, 0), spot)
+        assertEquals(Pair(0, 2), spot)
 
-        // If (2,0) is also occupied:
-        val w2 = createWidget(id = 2, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
-        // Row 0 and 1 are full. Next spot should be at row 2: (0, 2)
+        // If (0, 2) is also occupied:
+        val w2 = createWidget(id = 2, cellX = 0, cellY = 2, spanX = 2, spanY = 2)
+        // Column 0 and 1 are full (x=0,1 for y=0..3). Next spot should be at column 2: (2, 0)
         val nextSpot = resolver.findFirstAvailableSpot(
             spanX = 2,
             spanY = 2,
@@ -51,7 +51,7 @@ class GridCollisionResolverTest {
             columns = 4,
             rows = 4
         )
-        assertEquals(Pair(0, 2), nextSpot)
+        assertEquals(Pair(2, 0), nextSpot)
     }
 
     @Test
