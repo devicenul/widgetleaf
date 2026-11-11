@@ -1,6 +1,9 @@
 package io.devnullapps.widgetleaf.ui
 
 import android.view.ViewGroup
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -35,6 +38,7 @@ import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 import io.devnullapps.widgetleaf.domain.model.TopBarPosition
 import io.devnullapps.widgetleaf.domain.model.WidgetCatalogItem
 import io.devnullapps.widgetleaf.domain.usecase.CalculateResponsiveSizesUseCase
+import io.devnullapps.widgetleaf.ui.components.DeckPageTransitionSpec
 import io.devnullapps.widgetleaf.ui.components.WidgetDeckOverlayScreen
 import io.devnullapps.widgetleaf.ui.hostview.DeckAppWidgetHostView
 import io.devnullapps.widgetleaf.ui.hostview.DeckWidgetHostContainer
@@ -56,6 +60,7 @@ class DeckScreenComposeTest {
     @Test
     fun emptyPageOneDisplaysHintAndBottomPaginationHud() {
         val state = DeckUiState(
+            isReady = true,
             pages = listOf(DeckPage(pageIndex = 0, customLabel = null)),
             widgets = emptyList()
         )
@@ -88,6 +93,7 @@ class DeckScreenComposeTest {
     fun clickingEmptyBlurredCanvasInvokesOnDismissOverlay() {
         var dismissed = false
         val state = DeckUiState(
+            isReady = true,
             pages = listOf(DeckPage(pageIndex = 0, customLabel = null)),
             widgets = emptyList(),
             editingWidgetId = null
@@ -132,6 +138,7 @@ class DeckScreenComposeTest {
 
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     pages = pages,
                     activePageIndex = currentPage
                 ),
@@ -194,6 +201,7 @@ class DeckScreenComposeTest {
 
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     pages = pages,
                     activePageIndex = 1,
                     editingPageLabelIndex = curEditingIndex,
@@ -258,6 +266,7 @@ class DeckScreenComposeTest {
 
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     contextMenuPosition = contextMenuPos,
                     isWidgetPickerOpen = isPickerOpen
                 ),
@@ -315,6 +324,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             var query by remember { mutableStateOf("") }
             val state = DeckUiState(
+            isReady = true,
                 isWidgetPickerOpen = true,
                 widgetSearchQuery = query,
                 catalogItems = catalog
@@ -371,6 +381,7 @@ class DeckScreenComposeTest {
 
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     isOverlaySettingsOpen = true,
                     settings = s
                 ),
@@ -446,6 +457,7 @@ class DeckScreenComposeTest {
 
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     widgets = currentWidgets,
                     editingWidgetId = currentEditingId
                 ),
@@ -527,6 +539,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     widgets = listOf(widget),
                     editingWidgetId = currentEditingId
                 ),
@@ -651,6 +664,7 @@ class DeckScreenComposeTest {
 
         var state by mutableStateOf(
             DeckUiState(
+                isReady = true,
                 widgets = listOf(w1, w2),
                 editingWidgetId = 201
             )
@@ -751,6 +765,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     widgets = listOf(widget),
                     editingWidgetId = 301
                 ),
@@ -804,6 +819,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     widgets = listOf(widget),
                     editingWidgetId = 302
                 ),
@@ -875,6 +891,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     widgets = listOf(noneWidget, horizWidget, vertWidget),
                     editingWidgetId = editingId
                 ),
@@ -969,6 +986,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     widgets = listOf(noneWidget, horizWidget, vertWidget, bothWidget),
                     editingWidgetId = editingId
                 ),
@@ -1044,6 +1062,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     widgets = listOf(widget),
                     editingWidgetId = 501
                 ),
@@ -1108,6 +1127,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     widgets = listOf(widget),
                     editingWidgetId = 502
                 ),
@@ -1185,6 +1205,7 @@ class DeckScreenComposeTest {
 
         var state by mutableStateOf(
             DeckUiState(
+                isReady = true,
                 widgets = listOf(w1, w2),
                 editingWidgetId = 601
             )
@@ -1312,7 +1333,9 @@ class DeckScreenComposeTest {
 
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
-                uiState = DeckUiState(),
+                uiState = DeckUiState(
+                    isReady = true
+                ),
                 onDismissOverlay = {},
                 onSelectPage = {},
                 onPreviousPage = {},
@@ -1340,6 +1363,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     contextMenuPosition = Pair(150f, 150f)
                 ),
                 onDismissOverlay = {},
@@ -1369,6 +1393,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     isOverlaySettingsOpen = true,
                     settings = currentSettings
                 ),
@@ -1420,6 +1445,7 @@ class DeckScreenComposeTest {
         )
         val profile = DesktopGridProfile()
         val state = DeckUiState(
+            isReady = true,
             pages = listOf(DeckPage(pageIndex = 0)),
             widgets = listOf(widget),
             gridProfile = profile
@@ -1496,6 +1522,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     widgets = listOf(widget),
                     editingWidgetId = 301,
                     draggingWidgetId = 301
@@ -1566,6 +1593,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     widgets = listOf(widget),
                     editingWidgetId = 302,
                     draggingWidgetId = 302
@@ -1637,6 +1665,7 @@ class DeckScreenComposeTest {
         composeTestRule.setContent {
             WidgetDeckOverlayScreen(
                 uiState = DeckUiState(
+                    isReady = true,
                     widgets = listOf(widget),
                     editingWidgetId = 303,
                     draggingWidgetId = 303,
@@ -1699,6 +1728,7 @@ class DeckScreenComposeTest {
 
         // When dwelling right past page 0, previewPageCount = 2 synthesizes speculative Page 1
         val stateWithSpeculativePage = DeckUiState(
+            isReady = true,
             pages = listOf(DeckPage(pageIndex = 0)),
             widgets = listOf(widget),
             activePageIndex = 1,
@@ -1759,6 +1789,7 @@ class DeckScreenComposeTest {
 
         composeTestRule.setContent {
             val state = DeckUiState(
+            isReady = true,
                 pages = listOf(DeckPage(pageIndex = 0)),
                 widgets = currentWidgets,
                 gridProfile = profile,
@@ -1860,5 +1891,112 @@ class DeckScreenComposeTest {
         assertThat(cachedHostView.isAttachedToWindow).isTrue()
         assertThat(cachedHostView.interactionMode).isEqualTo(DeckAppWidgetHostView.HostInteractionMode.INTERACTIVE)
         composeTestRule.onNodeWithTag("placed_widget_101").assertIsDisplayed()
+    }
+
+    @Test
+    fun initialPageRestore_opensDirectlyOnTargetPageWithoutPageZeroComposition() {
+        val widgetPage0 = PlacedWidget(
+            appWidgetId = 801,
+            providerPackage = "io.test.pkg",
+            providerClass = "PageZeroWidget",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2
+        )
+        val widgetPage2 = PlacedWidget(
+            appWidgetId = 802,
+            providerPackage = "io.test.pkg",
+            providerClass = "PageTwoWidget",
+            pageIndex = 2,
+            cellX = 0,
+            cellY = 0,
+            spanX = 2,
+            spanY = 2
+        )
+        val pages = listOf(DeckPage(0), DeckPage(1), DeckPage(2))
+        val composedWidgetIds = mutableListOf<Int>()
+
+        var state by mutableStateOf(
+            DeckUiState(
+                isReady = false,
+                snapPageTransitions = true,
+                pages = pages,
+                widgets = listOf(widgetPage0, widgetPage2),
+                activePageIndex = 0
+            )
+        )
+
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = state,
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                widgetContent = { placed ->
+                    composedWidgetIds.add(placed.appWidgetId)
+                }
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        // 1. While isReady is false, neither page's widget is composed or displayed
+        assertThat(composedWidgetIds).isEmpty()
+        composeTestRule.onNodeWithTag("placed_widget_801").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("placed_widget_802").assertDoesNotExist()
+
+        // 2. Resolve target page (page 2) and mark isReady = true
+        composeTestRule.runOnIdle {
+            state = state.copy(
+                isReady = true,
+                activePageIndex = 2,
+                snapPageTransitions = true
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        // 3. Page 2 is displayed immediately; Page 0 content was never composed or displayed
+        composeTestRule.onNodeWithTag("placed_widget_802").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("placed_widget_801").assertDoesNotExist()
+        assertThat(composedWidgetIds).contains(802)
+        assertThat(composedWidgetIds).doesNotContain(801)
+    }
+
+    @Test
+    fun deckPageTransitionSpec_snapTransitionsUseNoneTransform() {
+        val snappedTransform = DeckPageTransitionSpec.createTransition(
+            snapPageTransitions = true,
+            initialState = 0,
+            targetState = 2
+        )
+        assertThat(snappedTransform.targetContentEnter).isEqualTo(EnterTransition.None)
+        assertThat(snappedTransform.initialContentExit).isEqualTo(ExitTransition.None)
+
+        val animatedForward = DeckPageTransitionSpec.createTransition(
+            snapPageTransitions = false,
+            initialState = 0,
+            targetState = 2
+        )
+        assertThat(animatedForward.targetContentEnter).isNotEqualTo(EnterTransition.None)
+        assertThat(animatedForward.initialContentExit).isNotEqualTo(ExitTransition.None)
+
+        val animatedBackward = DeckPageTransitionSpec.createTransition(
+            snapPageTransitions = false,
+            initialState = 2,
+            targetState = 0
+        )
+        assertThat(animatedBackward.targetContentEnter).isNotEqualTo(EnterTransition.None)
+        assertThat(animatedBackward.initialContentExit).isNotEqualTo(ExitTransition.None)
     }
 }

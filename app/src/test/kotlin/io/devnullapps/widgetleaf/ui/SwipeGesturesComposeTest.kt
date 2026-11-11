@@ -38,6 +38,7 @@ class SwipeGesturesComposeTest {
 
         composeTestRule.setContent {
             val state = DeckUiState(
+                isReady = true,
                 pages = pages,
                 activePageIndex = activePage,
                 widgets = emptyList()
@@ -110,6 +111,7 @@ class SwipeGesturesComposeTest {
         composeTestRule.setContent {
             var isDownDismiss by remember { mutableStateOf(false) }
             val state = DeckUiState(
+                isReady = true,
                 pages = listOf(DeckPage(0)),
                 activePageIndex = 0,
                 widgets = emptyList()
@@ -171,6 +173,7 @@ class SwipeGesturesComposeTest {
             spanY = 4
         )
         val state = DeckUiState(
+            isReady = true,
             pages = listOf(DeckPage(0)),
             activePageIndex = 0,
             widgets = listOf(placed)
@@ -231,6 +234,7 @@ class SwipeGesturesComposeTest {
             spanY = 4
         )
         val state = DeckUiState(
+            isReady = true,
             pages = listOf(DeckPage(0), DeckPage(1)),
             activePageIndex = activePage,
             widgets = listOf(placed),

@@ -25,6 +25,8 @@ sealed interface PendingWidgetAction {
 }
 
 data class DeckUiState(
+    val isReady: Boolean = false,
+    val snapPageTransitions: Boolean = true,
     val pages: List<DeckPage> = listOf(DeckPage(pageIndex = 0, customLabel = null)),
     val widgets: List<PlacedWidget> = emptyList(),
     val activePageIndex: Int = 0,

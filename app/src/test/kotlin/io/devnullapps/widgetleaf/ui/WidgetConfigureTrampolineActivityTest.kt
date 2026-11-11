@@ -131,6 +131,7 @@ class WidgetConfigureTrampolineActivityTest {
             val nextIntent = shadowApp.nextStartedActivity
             assertThat(nextIntent).isNotNull()
             assertThat(nextIntent.action).isEqualTo(ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK)
+            assertThat(nextIntent.getIntExtra(ActiveDisplayLaunchHelper.EXTRA_TARGET_PAGE_INDEX, -1)).isEqualTo(1)
             assertThat((nextIntent.flags and Intent.FLAG_ACTIVITY_NEW_TASK) != 0).isTrue()
             assertThat((nextIntent.flags and Intent.FLAG_ACTIVITY_CLEAR_TASK) != 0).isTrue()
         } finally {
@@ -146,6 +147,7 @@ class WidgetConfigureTrampolineActivityTest {
         val intent = Intent(context, WidgetConfigureTrampolineActivity::class.java).apply {
             putExtra(WidgetConfigureTrampolineActivity.EXTRA_APPWIDGET_ID, 66)
             putExtra(WidgetConfigureTrampolineActivity.EXTRA_IS_RECONFIGURE, false)
+            putExtra(WidgetConfigureTrampolineActivity.EXTRA_ORIGIN_PAGE_INDEX, 2)
             putExtra(WidgetConfigureTrampolineActivity.EXTRA_CANDIDATE_WIDGET, candidate)
         }
         val controller = Robolectric.buildActivity(WidgetConfigureTrampolineActivity::class.java, intent).create()
@@ -160,12 +162,13 @@ class WidgetConfigureTrampolineActivityTest {
             val (_, widgets) = appContainer.repository.getSnapshot()
             assertThat(widgets.find { it.appWidgetId == 66 }).isNull()
 
-            // Overlay relaunched and activity finished
+            // Overlay relaunched and activity finished with origin page index
             assertThat(activity.isFinishing).isTrue()
             val shadowApp = Shadows.shadowOf(context)
             val nextIntent = shadowApp.nextStartedActivity
             assertThat(nextIntent).isNotNull()
             assertThat(nextIntent.action).isEqualTo(ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK)
+            assertThat(nextIntent.getIntExtra(ActiveDisplayLaunchHelper.EXTRA_TARGET_PAGE_INDEX, -1)).isEqualTo(2)
         } finally {
             controller.destroy()
             Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
@@ -175,12 +178,13 @@ class WidgetConfigureTrampolineActivityTest {
     @Test
     fun reconfigure_resultOk_doesNotDuplicateAndRelaunches() = runTest {
         val context = ApplicationProvider.getApplicationContext<Application>()
-        val existing = createCandidate(id = 77, pageIndex = 0)
+        val existing = createCandidate(id = 77, pageIndex = 1)
         appContainer.repository.upsertWidget(existing)
 
         val intent = Intent(context, WidgetConfigureTrampolineActivity::class.java).apply {
             putExtra(WidgetConfigureTrampolineActivity.EXTRA_APPWIDGET_ID, 77)
             putExtra(WidgetConfigureTrampolineActivity.EXTRA_IS_RECONFIGURE, true)
+            putExtra(WidgetConfigureTrampolineActivity.EXTRA_ORIGIN_PAGE_INDEX, 1)
             putExtra(WidgetConfigureTrampolineActivity.EXTRA_CANDIDATE_WIDGET, null as PlacedWidget?)
         }
         val controller = Robolectric.buildActivity(WidgetConfigureTrampolineActivity::class.java, intent).create()
@@ -193,6 +197,10 @@ class WidgetConfigureTrampolineActivityTest {
             val (_, widgets) = appContainer.repository.getSnapshot()
             assertThat(widgets.filter { it.appWidgetId == 77 }).hasSize(1)
             assertThat(activity.isFinishing).isTrue()
+            val shadowApp = Shadows.shadowOf(context)
+            val nextIntent = shadowApp.nextStartedActivity
+            assertThat(nextIntent).isNotNull()
+            assertThat(nextIntent.getIntExtra(ActiveDisplayLaunchHelper.EXTRA_TARGET_PAGE_INDEX, -1)).isEqualTo(1)
         } finally {
             controller.destroy()
             Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
@@ -202,12 +210,13 @@ class WidgetConfigureTrampolineActivityTest {
     @Test
     fun reconfigure_resultCanceled_doesNotDeleteWidget() = runTest {
         val context = ApplicationProvider.getApplicationContext<Application>()
-        val existing = createCandidate(id = 88, pageIndex = 0)
+        val existing = createCandidate(id = 88, pageIndex = 2)
         appContainer.repository.upsertWidget(existing)
 
         val intent = Intent(context, WidgetConfigureTrampolineActivity::class.java).apply {
             putExtra(WidgetConfigureTrampolineActivity.EXTRA_APPWIDGET_ID, 88)
             putExtra(WidgetConfigureTrampolineActivity.EXTRA_IS_RECONFIGURE, true)
+            putExtra(WidgetConfigureTrampolineActivity.EXTRA_ORIGIN_PAGE_INDEX, 2)
         }
         val controller = Robolectric.buildActivity(WidgetConfigureTrampolineActivity::class.java, intent).create()
         try {
@@ -219,6 +228,10 @@ class WidgetConfigureTrampolineActivityTest {
             val (_, widgets) = appContainer.repository.getSnapshot()
             assertThat(widgets.find { it.appWidgetId == 88 }).isNotNull()
             assertThat(activity.isFinishing).isTrue()
+            val shadowApp = Shadows.shadowOf(context)
+            val nextIntent = shadowApp.nextStartedActivity
+            assertThat(nextIntent).isNotNull()
+            assertThat(nextIntent.getIntExtra(ActiveDisplayLaunchHelper.EXTRA_TARGET_PAGE_INDEX, -1)).isEqualTo(2)
         } finally {
             controller.destroy()
             Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()

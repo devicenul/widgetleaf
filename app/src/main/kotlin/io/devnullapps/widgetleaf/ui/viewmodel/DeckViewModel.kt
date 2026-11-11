@@ -23,6 +23,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -168,24 +169,32 @@ class DeckViewModel(
 
     // --- Overlay Lifecycle & Startup ---
 
-    fun onOverlayShown() {
+    fun onOverlayShown(targetPageOverride: Int? = null) {
         cancelWidgetDrag()
         viewModelScope.launch {
             reconcileOrphanWidgetsUseCase()
+            val (snapshotPages, _) = repository.getSnapshot()
+            val settings = repository.settingsFlow.first()
+            val safePages = if (snapshotPages.isNotEmpty()) snapshotPages else _uiState.value.pages
             val profile = _uiState.value.gridProfile
-            val catalog = widgetHostGateway.getInstalledCatalog(profile)
-            val settings = _uiState.value.settings
-            val pages = _uiState.value.pages
-            val targetPage = if (settings.openOnPageOne) {
-                0
-            } else {
-                settings.lastViewedPageIndex.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
-            }
+            val currentWidgets = _uiState.value.widgets
+            val (displayedPages, displayedWidgets) = deriveDisplayedState(
+                currentWidgets,
+                safePages,
+                profile
+            )
 
+            val targetPage = targetPageOverride?.coerceIn(0, (displayedPages.size - 1).coerceAtLeast(0))
+                ?: if (settings.openOnPageOne) {
+                    0
+                } else {
+                    settings.lastViewedPageIndex.coerceIn(0, (displayedPages.size - 1).coerceAtLeast(0))
+                }
+
+            val catalog = widgetHostGateway.getInstalledCatalog(profile)
             // Refresh stored widget limits from installed provider info where available
             val catalogMap = catalog.associateBy { it.providerPackage to it.providerClass }
-            val currentWidgets = _uiState.value.widgets
-            val refreshedWidgets = currentWidgets.map { w ->
+            val refreshedWidgets = displayedWidgets.map { w ->
                 val provider = catalogMap[w.providerPackage to w.providerClass]
                 if (provider != null) {
                     w.copy(
@@ -201,7 +210,7 @@ class DeckViewModel(
                     w
                 }
             }
-            if (refreshedWidgets != currentWidgets) {
+            if (refreshedWidgets != displayedWidgets) {
                 repository.upsertWidgets(refreshedWidgets)
             }
 
@@ -213,13 +222,21 @@ class DeckViewModel(
             _uiState.update { current ->
                 current.copy(
                     widgets = refreshedWidgets,
+                    pages = displayedPages,
+                    settings = settings,
                     catalogItems = catalog,
                     activePageIndex = targetPage,
+                    isReady = true,
+                    snapPageTransitions = true,
                     isLaunchingInternalFlow = false,
                     pendingWidgetAction = null
                 )
             }
         }
+    }
+
+    fun enablePageAnimations() {
+        _uiState.update { it.copy(snapPageTransitions = false) }
     }
 
     // --- Page Navigation ---
@@ -230,7 +247,7 @@ class DeckViewModel(
         if (pages.size <= 1) return
         val currentIndex = _uiState.value.activePageIndex
         val newIndex = if (currentIndex <= 0) pages.lastIndex else currentIndex - 1
-        _uiState.update { it.copy(activePageIndex = newIndex) }
+        _uiState.update { it.copy(activePageIndex = newIndex, snapPageTransitions = false) }
         viewModelScope.launch {
             repository.updateSettings { it.copy(lastViewedPageIndex = newIndex) }
         }
@@ -242,7 +259,7 @@ class DeckViewModel(
         if (pages.size <= 1) return
         val currentIndex = _uiState.value.activePageIndex
         val newIndex = if (currentIndex >= pages.lastIndex) 0 else currentIndex + 1
-        _uiState.update { it.copy(activePageIndex = newIndex) }
+        _uiState.update { it.copy(activePageIndex = newIndex, snapPageTransitions = false) }
         viewModelScope.launch {
             repository.updateSettings { it.copy(lastViewedPageIndex = newIndex) }
         }
@@ -258,7 +275,7 @@ class DeckViewModel(
         val currentIndex = _uiState.value.activePageIndex
         if (currentIndex > 0) {
             val newIndex = currentIndex - 1
-            _uiState.update { it.copy(activePageIndex = newIndex) }
+            _uiState.update { it.copy(activePageIndex = newIndex, snapPageTransitions = false) }
             viewModelScope.launch {
                 repository.updateSettings { it.copy(lastViewedPageIndex = newIndex) }
             }
@@ -277,7 +294,7 @@ class DeckViewModel(
         val currentIndex = _uiState.value.activePageIndex
         if (currentIndex < pages.lastIndex) {
             val newIndex = currentIndex + 1
-            _uiState.update { it.copy(activePageIndex = newIndex) }
+            _uiState.update { it.copy(activePageIndex = newIndex, snapPageTransitions = false) }
             viewModelScope.launch {
                 repository.updateSettings { it.copy(lastViewedPageIndex = newIndex) }
             }
@@ -290,7 +307,7 @@ class DeckViewModel(
         cancelWidgetDrag()
         val pages = _uiState.value.pages
         if (index in pages.indices) {
-            _uiState.update { it.copy(activePageIndex = index) }
+            _uiState.update { it.copy(activePageIndex = index, snapPageTransitions = false) }
             viewModelScope.launch {
                 repository.updateSettings { it.copy(lastViewedPageIndex = index) }
             }
@@ -306,7 +323,7 @@ class DeckViewModel(
         }
         val pages = _uiState.value.pages
         if (targetIndex in pages.indices) {
-            _uiState.update { it.copy(activePageIndex = targetIndex) }
+            _uiState.update { it.copy(activePageIndex = targetIndex, snapPageTransitions = false) }
             viewModelScope.launch {
                 repository.updateSettings { it.copy(lastViewedPageIndex = targetIndex) }
             }
@@ -651,6 +668,7 @@ class DeckViewModel(
                 pages = displayedPages,
                 widgets = displayedWidgets,
                 activePageIndex = targetPageIndex.coerceIn(0, displayedPages.lastIndex),
+                snapPageTransitions = false,
                 isWidgetPickerOpen = false,
                 draggingCatalogItem = null,
                 isLaunchingInternalFlow = false,
@@ -866,7 +884,8 @@ class DeckViewModel(
         _uiState.update {
             it.copy(
                 activePageIndex = targetPageIndex,
-                previewPageCount = if (newPageCount > currentPages.size) newPageCount else it.previewPageCount
+                previewPageCount = if (newPageCount > currentPages.size) newPageCount else it.previewPageCount,
+                snapPageTransitions = false
             )
         }
 

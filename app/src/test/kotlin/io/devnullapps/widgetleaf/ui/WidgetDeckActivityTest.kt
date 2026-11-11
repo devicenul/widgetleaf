@@ -743,6 +743,7 @@ class WidgetDeckActivityTest {
             assertThat(nextIntent.component?.className).isEqualTo(WidgetConfigureTrampolineActivity::class.java.name)
             assertThat(nextIntent.getIntExtra(WidgetConfigureTrampolineActivity.EXTRA_APPWIDGET_ID, -1)).isEqualTo(77)
             assertThat(nextIntent.getBooleanExtra(WidgetConfigureTrampolineActivity.EXTRA_IS_RECONFIGURE, false)).isFalse()
+            assertThat(nextIntent.getIntExtra(WidgetConfigureTrampolineActivity.EXTRA_ORIGIN_PAGE_INDEX, -1)).isEqualTo(0)
             val passedCandidate = BundleCompatHelper.getSerializable(
                 nextIntent.extras,
                 WidgetConfigureTrampolineActivity.EXTRA_CANDIDATE_WIDGET,
@@ -779,6 +780,23 @@ class WidgetDeckActivityTest {
             assertThat(nextIntent.component?.className).isEqualTo(WidgetConfigureTrampolineActivity::class.java.name)
             assertThat(nextIntent.getIntExtra(WidgetConfigureTrampolineActivity.EXTRA_APPWIDGET_ID, -1)).isEqualTo(99)
             assertThat(nextIntent.getBooleanExtra(WidgetConfigureTrampolineActivity.EXTRA_IS_RECONFIGURE, false)).isTrue()
+            assertThat(nextIntent.getIntExtra(WidgetConfigureTrampolineActivity.EXTRA_ORIGIN_PAGE_INDEX, -1)).isEqualTo(0)
+        } finally {
+            tearDownController(controller)
+        }
+    }
+
+    @Test
+    fun targetPageOverride_inIntent_passedToOverlayShownAndConsumed() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java).apply {
+            putExtra(ActiveDisplayLaunchHelper.EXTRA_TARGET_PAGE_INDEX, 2)
+        }
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            // Assert extra was consumed (removed from intent)
+            assertThat(activity.intent.hasExtra(ActiveDisplayLaunchHelper.EXTRA_TARGET_PAGE_INDEX)).isFalse()
         } finally {
             tearDownController(controller)
         }

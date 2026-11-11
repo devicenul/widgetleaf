@@ -19,6 +19,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
@@ -1312,6 +1313,93 @@ class DeckViewModelTest {
         viewModel.onOverlayShown()
 
         assertEquals(2, viewModel.uiState.value.activePageIndex)
+    }
+
+    @Test
+    fun onOverlayShown_configureResultOk_opensOnWidgetPageEvenIfOpenOnPageOne() = runTest {
+        val w0 = PlacedWidget(101, "com.cat", "CatWidget", pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w1 = PlacedWidget(102, "com.cat", "CatWidget", pageIndex = 1, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = PlacedWidget(103, "com.cat", "CatWidget", pageIndex = 2, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeGateway.allocatedIds = listOf(101, 102, 103)
+        fakeGateway.installedProviders.add("com.cat" to "CatWidget")
+        fakeRepository.setWidgets(listOf(w0, w1, w2))
+        fakeRepository.settings = OverlaySettings(openOnPageOne = true, lastViewedPageIndex = 0)
+        fakeRepository.setPages(listOf(DeckPage(0), DeckPage(1), DeckPage(2)))
+
+        // Configure trampoline relaunches with targetPageOverride = 2 (where new widget was placed)
+        viewModel.onOverlayShown(targetPageOverride = 2)
+
+        assertEquals(2, viewModel.uiState.value.activePageIndex)
+        assertTrue(viewModel.uiState.value.isReady)
+    }
+
+    @Test
+    fun onOverlayShown_configureCancelled_opensOnOriginPage() = runTest {
+        val w0 = PlacedWidget(101, "com.cat", "CatWidget", pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w1 = PlacedWidget(102, "com.cat", "CatWidget", pageIndex = 1, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeGateway.allocatedIds = listOf(101, 102)
+        fakeGateway.installedProviders.add("com.cat" to "CatWidget")
+        fakeRepository.setWidgets(listOf(w0, w1))
+        fakeRepository.settings = OverlaySettings(openOnPageOne = true, lastViewedPageIndex = 0)
+        fakeRepository.setPages(listOf(DeckPage(0), DeckPage(1), DeckPage(2)))
+
+        // User started adding/reconfiguring on page 1, then cancelled
+        viewModel.onOverlayShown(targetPageOverride = 1)
+
+        assertEquals(1, viewModel.uiState.value.activePageIndex)
+        assertTrue(viewModel.uiState.value.isReady)
+    }
+
+    @Test
+    fun onOverlayShown_oneShotOverride_doesNotAffectLaterNormalOpens() = runTest {
+        val w0 = PlacedWidget(101, "com.cat", "CatWidget", pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w1 = PlacedWidget(102, "com.cat", "CatWidget", pageIndex = 1, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = PlacedWidget(103, "com.cat", "CatWidget", pageIndex = 2, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeGateway.allocatedIds = listOf(101, 102, 103)
+        fakeGateway.installedProviders.add("com.cat" to "CatWidget")
+        fakeRepository.setWidgets(listOf(w0, w1, w2))
+        fakeRepository.settings = OverlaySettings(openOnPageOne = true, lastViewedPageIndex = 0)
+        fakeRepository.setPages(listOf(DeckPage(0), DeckPage(1), DeckPage(2)))
+
+        // 1. Configure relaunch opens on page 2
+        viewModel.onOverlayShown(targetPageOverride = 2)
+        assertEquals(2, viewModel.uiState.value.activePageIndex)
+
+        // 2. Later normal open (without override) respects user's openOnPageOne setting
+        viewModel.onOverlayShown(targetPageOverride = null)
+        assertEquals(0, viewModel.uiState.value.activePageIndex)
+    }
+
+    @Test
+    fun onOverlayShown_lastPageSettingResolvesBeforeReady() = runTest {
+        val w0 = PlacedWidget(101, "com.cat", "CatWidget", pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w1 = PlacedWidget(102, "com.cat", "CatWidget", pageIndex = 1, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = PlacedWidget(103, "com.cat", "CatWidget", pageIndex = 2, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeGateway.allocatedIds = listOf(101, 102, 103)
+        fakeGateway.installedProviders.add("com.cat" to "CatWidget")
+        fakeRepository.setWidgets(listOf(w0, w1, w2))
+        fakeRepository.settings = OverlaySettings(openOnPageOne = false, lastViewedPageIndex = 2)
+        fakeRepository.setPages(listOf(DeckPage(0), DeckPage(1), DeckPage(2)))
+
+        // Before onOverlayShown, UI state is not ready
+        assertFalse(viewModel.uiState.value.isReady)
+
+        val readyActivePages = mutableListOf<Int>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.collect { state ->
+                if (state.isReady) {
+                    readyActivePages.add(state.activePageIndex)
+                }
+            }
+        }
+
+        viewModel.onOverlayShown()
+
+        assertTrue(viewModel.uiState.value.isReady)
+        assertEquals(2, viewModel.uiState.value.activePageIndex)
+        // All emissions when isReady == true must have activePageIndex == 2 (never intermediate 0)
+        assertTrue(readyActivePages.isNotEmpty())
+        assertTrue(readyActivePages.all { it == 2 })
     }
 
     // --- 9. Escape Key Hierarchy Priority Chain ---

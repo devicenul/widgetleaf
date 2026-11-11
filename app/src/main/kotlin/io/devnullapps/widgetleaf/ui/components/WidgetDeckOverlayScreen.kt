@@ -179,6 +179,7 @@ fun WidgetDeckOverlayScreen(
     onReconfigureWidget: ((appWidgetId: Int) -> Unit)? = null,
     onOpenContextMenu: (Pair<Float, Float>) -> Unit = {},
     onCloseContextMenu: () -> Unit = {},
+    onReady: () -> Unit = {},
     modifier: Modifier = Modifier,
     widgetContent: @Composable (PlacedWidget) -> Unit = { DefaultFramelessWidgetContent(it) }
 ) {
@@ -186,6 +187,12 @@ fun WidgetDeckOverlayScreen(
         val palette = WidgetLeafTheme.palette
         var lastContextMenuOpenUptimeMs by remember { mutableLongStateOf(-10_000L) }
         var lastWidgetMutationUptimeMs by remember { mutableLongStateOf(-10_000L) }
+
+        LaunchedEffect(uiState.isReady) {
+            if (uiState.isReady && uiState.snapPageTransitions) {
+                onReady()
+            }
+        }
 
         val isSwipeGesturesEnabled = uiState.editingWidgetId == null &&
             uiState.draggingWidgetId == null &&
@@ -248,120 +255,100 @@ fun WidgetDeckOverlayScreen(
 
             // LAYER 3: Multi-Page Canvas with 280ms Spring Transition
             val pageTransitionSpec: AnimatedContentTransitionScope<Int>.() -> ContentTransform = {
-                if (targetState > initialState) {
-                    slideInHorizontally(
-                        animationSpec = spring(
-                            dampingRatio = MotionSpec.PAGE_FLIP_SPRING_DAMPING,
-                            stiffness = MotionSpec.PAGE_FLIP_SPRING_STIFFNESS
-                        )
-                    ) { it } togetherWith slideOutHorizontally(
-                        animationSpec = spring(
-                            dampingRatio = MotionSpec.PAGE_FLIP_SPRING_DAMPING,
-                            stiffness = MotionSpec.PAGE_FLIP_SPRING_STIFFNESS
-                        )
-                    ) { -it }
-                } else if (targetState < initialState) {
-                    slideInHorizontally(
-                        animationSpec = spring(
-                            dampingRatio = MotionSpec.PAGE_FLIP_SPRING_DAMPING,
-                            stiffness = MotionSpec.PAGE_FLIP_SPRING_STIFFNESS
-                        )
-                    ) { -it } togetherWith slideOutHorizontally(
-                        animationSpec = spring(
-                            dampingRatio = MotionSpec.PAGE_FLIP_SPRING_DAMPING,
-                            stiffness = MotionSpec.PAGE_FLIP_SPRING_STIFFNESS
-                        )
-                    ) { it }
-                } else {
-                    EnterTransition.None togetherWith ExitTransition.None
-                }
+                DeckPageTransitionSpec.createTransition(
+                    snapPageTransitions = uiState.snapPageTransitions,
+                    initialState = initialState,
+                    targetState = targetState
+                )
             }
 
-            AnimatedContent(
-                targetState = uiState.activePageIndex,
-                transitionSpec = pageTransitionSpec,
-                label = "DeckPageTransition",
-                modifier = Modifier.fillMaxSize()
-            ) { pageIndex ->
-                val pageWidgets = uiState.effectiveWidgets.filter { it.pageIndex == pageIndex }
-                val showEmptyHint = uiState.showEmptyCanvasHint && pageIndex == 0
-                val draggedWidget = uiState.effectiveWidgets.find { it.appWidgetId == uiState.draggingWidgetId }
+            if (uiState.isReady) {
+                AnimatedContent(
+                    targetState = uiState.activePageIndex,
+                    transitionSpec = pageTransitionSpec,
+                    label = "DeckPageTransition",
+                    modifier = Modifier.fillMaxSize()
+                ) { pageIndex ->
+                    val pageWidgets = uiState.effectiveWidgets.filter { it.pageIndex == pageIndex }
+                    val showEmptyHint = uiState.showEmptyCanvasHint && pageIndex == 0
+                    val draggedWidget = uiState.effectiveWidgets.find { it.appWidgetId == uiState.draggingWidgetId }
 
-                WidgetGridPage(
-                    widgets = pageWidgets,
-                    gridProfile = uiState.gridProfile,
-                    showEmptyCanvasHint = showEmptyHint,
-                    editingWidgetId = uiState.editingWidgetId,
-                    useCenteredBentoCanvas = uiState.settings.useCenteredBentoCanvas,
-                    draggingWidgetId = uiState.draggingWidgetId,
-                    draggedWidget = draggedWidget,
-                    hoveredCell = uiState.hoveredCell,
-                    onStartWidgetDrag = { id ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onStartWidgetDrag(id)
-                    },
-                    onWidgetHoverCellChanged = { id, x, y ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onWidgetHoverCellChanged(id, x, y)
-                    },
-                    onCommitWidgetDrag = { id, x, y ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onCommitWidgetDrag(id, x, y)
-                    },
-                    onCancelWidgetDrag = {
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onCancelWidgetDrag()
-                    },
-                    onEnterEditMode = { id ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onEnterEditMode(id)
-                    },
-                    onMoveWidget = { id, x, y ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onMoveWidget(id, x, y)
-                    },
-                    onResizeWidget = { id, x, y, sx, sy ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onResizeWidget(id, x, y, sx, sy)
-                    },
-                    onDragAcrossEdge = { id, dir, x, y ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onDragAcrossEdge(id, dir, x, y)
-                    },
-                    onRemoveWidget = { id ->
-                        lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                        onRemoveWidget(id)
-                    },
-                    onReconfigureWidget = onReconfigureWidget?.let { callback ->
-                        { id ->
+                    WidgetGridPage(
+                        widgets = pageWidgets,
+                        gridProfile = uiState.gridProfile,
+                        showEmptyCanvasHint = showEmptyHint,
+                        editingWidgetId = uiState.editingWidgetId,
+                        useCenteredBentoCanvas = uiState.settings.useCenteredBentoCanvas,
+                        draggingWidgetId = uiState.draggingWidgetId,
+                        draggedWidget = draggedWidget,
+                        hoveredCell = uiState.hoveredCell,
+                        onStartWidgetDrag = { id ->
                             lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
-                            callback(id)
-                        }
-                    },
-                    onEmptyCanvasClick = {
-                        val now = SystemClock.uptimeMillis()
-                        val sinceContextOpenMs = now - lastContextMenuOpenUptimeMs
-                        val sinceWidgetMutationMs = now - lastWidgetMutationUptimeMs
-                        if (sinceContextOpenMs >= 450L && sinceWidgetMutationMs >= 350L) {
-                            when {
-                                uiState.contextMenuPosition != null -> onCloseContextMenu()
-                                uiState.editingWidgetId != null -> onExitEditMode()
-                                uiState.editingPageLabelIndex != null -> onCancelEditPageLabel()
-                                !uiState.isWidgetPickerOpen && !uiState.isOverlaySettingsOpen -> onDismissOverlay()
+                            onStartWidgetDrag(id)
+                        },
+                        onWidgetHoverCellChanged = { id, x, y ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onWidgetHoverCellChanged(id, x, y)
+                        },
+                        onCommitWidgetDrag = { id, x, y ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onCommitWidgetDrag(id, x, y)
+                        },
+                        onCancelWidgetDrag = {
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onCancelWidgetDrag()
+                        },
+                        onEnterEditMode = { id ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onEnterEditMode(id)
+                        },
+                        onMoveWidget = { id, x, y ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onMoveWidget(id, x, y)
+                        },
+                        onResizeWidget = { id, x, y, sx, sy ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onResizeWidget(id, x, y, sx, sy)
+                        },
+                        onDragAcrossEdge = { id, dir, x, y ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onDragAcrossEdge(id, dir, x, y)
+                        },
+                        onRemoveWidget = { id ->
+                            lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                            onRemoveWidget(id)
+                        },
+                        onReconfigureWidget = onReconfigureWidget?.let { callback ->
+                            { id ->
+                                lastWidgetMutationUptimeMs = SystemClock.uptimeMillis()
+                                callback(id)
                             }
-                        }
-                    },
-                    onOpenContextMenu = { pos ->
-                        lastContextMenuOpenUptimeMs = SystemClock.uptimeMillis()
-                        onOpenContextMenu(pos)
-                    },
-                    widgetContent = widgetContent
-                )
+                        },
+                        onEmptyCanvasClick = {
+                            val now = SystemClock.uptimeMillis()
+                            val sinceContextOpenMs = now - lastContextMenuOpenUptimeMs
+                            val sinceWidgetMutationMs = now - lastWidgetMutationUptimeMs
+                            if (sinceContextOpenMs >= 450L && sinceWidgetMutationMs >= 350L) {
+                                when {
+                                    uiState.contextMenuPosition != null -> onCloseContextMenu()
+                                    uiState.editingWidgetId != null -> onExitEditMode()
+                                    uiState.editingPageLabelIndex != null -> onCancelEditPageLabel()
+                                    !uiState.isWidgetPickerOpen && !uiState.isOverlaySettingsOpen -> onDismissOverlay()
+                                }
+                            }
+                        },
+                        onOpenContextMenu = { pos ->
+                            lastContextMenuOpenUptimeMs = SystemClock.uptimeMillis()
+                            onOpenContextMenu(pos)
+                        },
+                        widgetContent = widgetContent
+                    )
+                }
             }
 
             // LAYER 3.5: Edit-Mode Drag & Resize Layer (Stationary overlay above AnimatedContent)
             val editingWidget = uiState.effectiveWidgets.find { it.appWidgetId == uiState.editingWidgetId }
-            if (editingWidget != null && (editingWidget.pageIndex == uiState.activePageIndex || uiState.draggingWidgetId == editingWidget.appWidgetId || uiState.resizingWidgetId == editingWidget.appWidgetId)) {
+            if (uiState.isReady && editingWidget != null && (editingWidget.pageIndex == uiState.activePageIndex || uiState.draggingWidgetId == editingWidget.appWidgetId || uiState.resizingWidgetId == editingWidget.appWidgetId)) {
                 key(editingWidget.appWidgetId) {
                     WidgetEditDragLayer(
                         widget = editingWidget,
@@ -424,7 +411,7 @@ fun WidgetDeckOverlayScreen(
             }
 
             // LAYER 2 (Cont.): Bottom Pagination HUD Pill (hidden while modal sheets/dialogs are open)
-            if (!uiState.isWidgetPickerOpen && !uiState.isOverlaySettingsOpen) {
+            if (uiState.isReady && !uiState.isWidgetPickerOpen && !uiState.isOverlaySettingsOpen) {
                 PageIndicatorHud(
                     pages = uiState.effectivePages,
                     activePageIndex = uiState.activePageIndex,
@@ -608,6 +595,42 @@ internal fun Modifier.overlaySwipeGestures(
                     onDismiss()
                 }
             }
+        }
+    }
+}
+
+internal object DeckPageTransitionSpec {
+    fun createTransition(
+        snapPageTransitions: Boolean,
+        initialState: Int,
+        targetState: Int
+    ): ContentTransform {
+        return if (snapPageTransitions || targetState == initialState) {
+            EnterTransition.None togetherWith ExitTransition.None
+        } else if (targetState > initialState) {
+            slideInHorizontally(
+                animationSpec = spring(
+                    dampingRatio = MotionSpec.PAGE_FLIP_SPRING_DAMPING,
+                    stiffness = MotionSpec.PAGE_FLIP_SPRING_STIFFNESS
+                )
+            ) { it } togetherWith slideOutHorizontally(
+                animationSpec = spring(
+                    dampingRatio = MotionSpec.PAGE_FLIP_SPRING_DAMPING,
+                    stiffness = MotionSpec.PAGE_FLIP_SPRING_STIFFNESS
+                )
+            ) { -it }
+        } else {
+            slideInHorizontally(
+                animationSpec = spring(
+                    dampingRatio = MotionSpec.PAGE_FLIP_SPRING_DAMPING,
+                    stiffness = MotionSpec.PAGE_FLIP_SPRING_STIFFNESS
+                )
+            ) { -it } togetherWith slideOutHorizontally(
+                animationSpec = spring(
+                    dampingRatio = MotionSpec.PAGE_FLIP_SPRING_DAMPING,
+                    stiffness = MotionSpec.PAGE_FLIP_SPRING_STIFFNESS
+                )
+            ) { it }
         }
     }
 }

@@ -15,6 +15,8 @@ object ActiveDisplayLaunchHelper {
     const val ACTION_OPEN_WIDGET_PICKER = "io.devnullapps.widgetleaf.ACTION_OPEN_WIDGET_PICKER"
     const val ACTION_OPEN_OVERLAY_SETTINGS = "io.devnullapps.widgetleaf.ACTION_OPEN_OVERLAY_SETTINGS"
 
+    const val EXTRA_TARGET_PAGE_INDEX = "io.devnullapps.widgetleaf.EXTRA_TARGET_PAGE_INDEX"
+
     const val DECK_ACTIVITY_CLASS_NAME = "io.devnullapps.widgetleaf.ui.WidgetDeckActivity"
 
     /**
@@ -37,10 +39,17 @@ object ActiveDisplayLaunchHelper {
     /**
      * Builds an [Intent] targeting [DECK_ACTIVITY_CLASS_NAME] with [FLAG_ACTIVITY_NEW_TASK] and [FLAG_ACTIVITY_CLEAR_TASK].
      */
-    fun createLaunchIntent(context: Context, action: String = ACTION_TOGGLE_DECK): Intent {
+    fun createLaunchIntent(
+        context: Context,
+        action: String = ACTION_TOGGLE_DECK,
+        targetPageIndex: Int? = null
+    ): Intent {
         return Intent(action).apply {
             component = ComponentName(context.packageName, DECK_ACTIVITY_CLASS_NAME)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            if (targetPageIndex != null) {
+                putExtra(EXTRA_TARGET_PAGE_INDEX, targetPageIndex)
+            }
         }
     }
 
@@ -79,8 +88,12 @@ object ActiveDisplayLaunchHelper {
     /**
      * Launches the overlay Activity on the currently active display.
      */
-    fun launchOverlay(context: Context, action: String = ACTION_TOGGLE_DECK) {
-        val intent = createLaunchIntent(context, action)
+    fun launchOverlay(
+        context: Context,
+        action: String = ACTION_TOGGLE_DECK,
+        targetPageIndex: Int? = null
+    ) {
+        val intent = createLaunchIntent(context, action, targetPageIndex)
         val options = createLaunchOptions(context)
         context.startActivity(intent, options.toBundle())
     }

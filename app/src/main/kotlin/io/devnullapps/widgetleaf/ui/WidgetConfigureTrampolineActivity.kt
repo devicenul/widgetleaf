@@ -50,6 +50,7 @@ class WidgetConfigureTrampolineActivity : ComponentActivity() {
     private var appWidgetId: Int = -1
     private var isReconfigure: Boolean = false
     private var candidateWidget: PlacedWidget? = null
+    private var originPageIndex: Int = 0
     private var hasLaunchedConfigure: Boolean = false
 
     override fun onDestroy() {
@@ -63,6 +64,7 @@ class WidgetConfigureTrampolineActivity : ComponentActivity() {
         if (savedInstanceState != null) {
             appWidgetId = savedInstanceState.getInt(EXTRA_APPWIDGET_ID, -1)
             isReconfigure = savedInstanceState.getBoolean(EXTRA_IS_RECONFIGURE, false)
+            originPageIndex = savedInstanceState.getInt(EXTRA_ORIGIN_PAGE_INDEX, 0)
             candidateWidget = BundleCompatHelper.getSerializable(
                 savedInstanceState,
                 EXTRA_CANDIDATE_WIDGET,
@@ -72,6 +74,7 @@ class WidgetConfigureTrampolineActivity : ComponentActivity() {
         } else {
             appWidgetId = intent.getIntExtra(EXTRA_APPWIDGET_ID, -1)
             isReconfigure = intent.getBooleanExtra(EXTRA_IS_RECONFIGURE, false)
+            originPageIndex = intent.getIntExtra(EXTRA_ORIGIN_PAGE_INDEX, 0)
             candidateWidget = BundleCompatHelper.getSerializable(
                 intent.extras,
                 EXTRA_CANDIDATE_WIDGET,
@@ -80,7 +83,7 @@ class WidgetConfigureTrampolineActivity : ComponentActivity() {
         }
 
         if (appWidgetId == -1) {
-            relaunchOverlayAndFinish()
+            relaunchOverlayAndFinish(targetPageIndex = originPageIndex)
             return
         }
 
@@ -94,6 +97,7 @@ class WidgetConfigureTrampolineActivity : ComponentActivity() {
         super.onSaveInstanceState(outState)
         outState.putInt(EXTRA_APPWIDGET_ID, appWidgetId)
         outState.putBoolean(EXTRA_IS_RECONFIGURE, isReconfigure)
+        outState.putInt(EXTRA_ORIGIN_PAGE_INDEX, originPageIndex)
         candidateWidget?.let { outState.putSerializable(EXTRA_CANDIDATE_WIDGET, it) }
         outState.putBoolean(KEY_HAS_LAUNCHED, hasLaunchedConfigure)
     }
@@ -136,6 +140,11 @@ class WidgetConfigureTrampolineActivity : ComponentActivity() {
 
     internal fun handleConfigureResult(resultOk: Boolean): Job? {
         val widget = candidateWidget
+        val targetPage = if (resultOk) {
+            widget?.pageIndex ?: originPageIndex
+        } else {
+            originPageIndex
+        }
         return if (resultOk) {
             if (!isReconfigure && widget != null) {
                 activityScope.launch {
@@ -148,23 +157,27 @@ class WidgetConfigureTrampolineActivity : ComponentActivity() {
                     }
                     container.repository.replaceDeckState(newPages, newWidgets)
                     container.repository.updateSettings { it.copy(lastViewedPageIndex = widget.pageIndex) }
-                    relaunchOverlayAndFinish()
+                    relaunchOverlayAndFinish(targetPageIndex = targetPage)
                 }
             } else {
-                relaunchOverlayAndFinish()
+                relaunchOverlayAndFinish(targetPageIndex = targetPage)
                 null
             }
         } else {
             if (!isReconfigure && appWidgetId != -1) {
                 container.widgetHostGateway.deleteAppWidgetId(appWidgetId)
             }
-            relaunchOverlayAndFinish()
+            relaunchOverlayAndFinish(targetPageIndex = targetPage)
             null
         }
     }
 
-    internal fun relaunchOverlayAndFinish() {
-        ActiveDisplayLaunchHelper.launchOverlay(this, ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK)
+    internal fun relaunchOverlayAndFinish(targetPageIndex: Int? = null) {
+        ActiveDisplayLaunchHelper.launchOverlay(
+            this,
+            ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK,
+            targetPageIndex = targetPageIndex
+        )
         finishWithoutAnimation()
     }
 
@@ -185,6 +198,7 @@ class WidgetConfigureTrampolineActivity : ComponentActivity() {
         const val EXTRA_APPWIDGET_ID = "io.devnullapps.widgetleaf.EXTRA_APPWIDGET_ID"
         const val EXTRA_IS_RECONFIGURE = "io.devnullapps.widgetleaf.EXTRA_IS_RECONFIGURE"
         const val EXTRA_CANDIDATE_WIDGET = "io.devnullapps.widgetleaf.EXTRA_CANDIDATE_WIDGET"
+        const val EXTRA_ORIGIN_PAGE_INDEX = "io.devnullapps.widgetleaf.EXTRA_ORIGIN_PAGE_INDEX"
         private const val KEY_HAS_LAUNCHED = "has_launched_configure"
 
         var testContainerOverride: AppContainer? = null

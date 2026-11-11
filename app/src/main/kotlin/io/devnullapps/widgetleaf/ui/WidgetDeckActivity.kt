@@ -131,7 +131,9 @@ class WidgetDeckActivity : ComponentActivity() {
             useCenteredBentoCanvas = initialSettings.useCenteredBentoCanvas
         )
         viewModel.updateGridProfile(resolvedGridProfile)
-        viewModel.onOverlayShown()
+        val targetPageOverride = intent.getIntExtra(ActiveDisplayLaunchHelper.EXTRA_TARGET_PAGE_INDEX, -1).takeIf { it >= 0 }
+        intent.removeExtra(ActiveDisplayLaunchHelper.EXTRA_TARGET_PAGE_INDEX)
+        viewModel.onOverlayShown(targetPageOverride = targetPageOverride)
         handleIncomingIntent(intent, isNewIntentWhileVisible = false)
 
         onBackPressedDispatcher.addCallback(
@@ -234,7 +236,8 @@ class WidgetDeckActivity : ComponentActivity() {
                         launchWidgetConfigurationTrampoline(
                             appWidgetId = action.appWidgetId,
                             candidateWidget = action.candidateWidget,
-                            isReconfigure = false
+                            isReconfigure = false,
+                            originPageIndex = viewModel.uiState.value.activePageIndex
                         )
                     }
                     null -> Unit
@@ -337,14 +340,18 @@ class WidgetDeckActivity : ComponentActivity() {
                 },
                 onReconfigureWidget = { appWidgetId ->
                     lastWidgetMutationOrFlowUptimeMs = SystemClock.uptimeMillis()
+                    val placedWidget = viewModel.uiState.value.widgets.find { it.appWidgetId == appWidgetId }
+                    val originPage = placedWidget?.pageIndex ?: viewModel.uiState.value.activePageIndex
                     launchWidgetConfigurationTrampoline(
                         appWidgetId = appWidgetId,
-                        candidateWidget = null,
-                        isReconfigure = true
+                        candidateWidget = placedWidget,
+                        isReconfigure = true,
+                        originPageIndex = originPage
                     )
                 },
                 onOpenContextMenu = viewModel::openContextMenu,
                 onCloseContextMenu = viewModel::closeContextMenu,
+                onReady = viewModel::enablePageAnimations,
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
@@ -418,11 +425,26 @@ class WidgetDeckActivity : ComponentActivity() {
         candidateWidget: PlacedWidget?,
         isReconfigure: Boolean
     ) {
+        launchWidgetConfigurationTrampoline(
+            appWidgetId = appWidgetId,
+            candidateWidget = candidateWidget,
+            isReconfigure = isReconfigure,
+            originPageIndex = viewModel.uiState.value.activePageIndex
+        )
+    }
+
+    private fun launchWidgetConfigurationTrampoline(
+        appWidgetId: Int,
+        candidateWidget: PlacedWidget?,
+        isReconfigure: Boolean,
+        originPageIndex: Int
+    ) {
         lastWidgetMutationOrFlowUptimeMs = SystemClock.uptimeMillis()
         viewModel.markLaunchingInternalFlow(true)
         val intent = Intent(this, WidgetConfigureTrampolineActivity::class.java).apply {
             putExtra(WidgetConfigureTrampolineActivity.EXTRA_APPWIDGET_ID, appWidgetId)
             putExtra(WidgetConfigureTrampolineActivity.EXTRA_IS_RECONFIGURE, isReconfigure)
+            putExtra(WidgetConfigureTrampolineActivity.EXTRA_ORIGIN_PAGE_INDEX, originPageIndex)
             candidateWidget?.let {
                 putExtra(WidgetConfigureTrampolineActivity.EXTRA_CANDIDATE_WIDGET, it)
             }
@@ -487,6 +509,11 @@ class WidgetDeckActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        val targetPageOverride = intent.getIntExtra(ActiveDisplayLaunchHelper.EXTRA_TARGET_PAGE_INDEX, -1).takeIf { it >= 0 }
+        if (targetPageOverride != null) {
+            intent.removeExtra(ActiveDisplayLaunchHelper.EXTRA_TARGET_PAGE_INDEX)
+            viewModel.onOverlayShown(targetPageOverride = targetPageOverride)
+        }
         val now = SystemClock.uptimeMillis()
         if (intent.action == ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK ||
             intent.action == Intent.ACTION_ASSIST
