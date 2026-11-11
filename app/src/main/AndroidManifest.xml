@@ -98,6 +98,13 @@
             android:taskAffinity=""
             android:theme="@android:style/Theme.NoDisplay" />
 
+        <activity
+            android:name=".ui.WidgetConfigureTrampolineActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity="io.devnullapps.widgetleaf.configure"
+            android:theme="@style/Theme.WidgetLeaf.Trampoline" />
+
         <receiver
             android:name=".services.BootCompletedReceiver"
             android:directBootAware="true"

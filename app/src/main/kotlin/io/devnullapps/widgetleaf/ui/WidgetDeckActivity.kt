@@ -231,7 +231,11 @@ class WidgetDeckActivity : ComponentActivity() {
                     }
                     is PendingWidgetAction.RequestConfigure -> {
                         lastWidgetMutationOrFlowUptimeMs = SystemClock.uptimeMillis()
-                        launchWidgetConfigurationActivity(action.appWidgetId)
+                        launchWidgetConfigurationTrampoline(
+                            appWidgetId = action.appWidgetId,
+                            candidateWidget = action.candidateWidget,
+                            isReconfigure = false
+                        )
                     }
                     null -> Unit
                 }
@@ -333,7 +337,11 @@ class WidgetDeckActivity : ComponentActivity() {
                 },
                 onReconfigureWidget = { appWidgetId ->
                     lastWidgetMutationOrFlowUptimeMs = SystemClock.uptimeMillis()
-                    launchWidgetConfigurationActivity(appWidgetId)
+                    launchWidgetConfigurationTrampoline(
+                        appWidgetId = appWidgetId,
+                        candidateWidget = null,
+                        isReconfigure = true
+                    )
                 },
                 onOpenContextMenu = viewModel::openContextMenu,
                 onCloseContextMenu = viewModel::closeContextMenu,
@@ -405,22 +413,24 @@ class WidgetDeckActivity : ComponentActivity() {
         )
     }
 
-    private fun launchWidgetConfigurationActivity(appWidgetId: Int) {
+    private fun launchWidgetConfigurationTrampoline(
+        appWidgetId: Int,
+        candidateWidget: PlacedWidget?,
+        isReconfigure: Boolean
+    ) {
         lastWidgetMutationOrFlowUptimeMs = SystemClock.uptimeMillis()
         viewModel.markLaunchingInternalFlow(true)
-        try {
-            val options = createConfigureLaunchOptions()
-            container.widgetDeckHost.startAppWidgetConfigureActivityForResult(
-                this,
-                appWidgetId,
-                0,
-                REQUEST_CODE_CONFIGURE_WIDGET,
-                options.toBundle()
-            )
-        } catch (t: Throwable) {
-            viewModel.markLaunchingInternalFlow(false)
-            viewModel.onConfigureWidgetResult(appWidgetId, resultOk = true)
+        val intent = Intent(this, WidgetConfigureTrampolineActivity::class.java).apply {
+            putExtra(WidgetConfigureTrampolineActivity.EXTRA_APPWIDGET_ID, appWidgetId)
+            putExtra(WidgetConfigureTrampolineActivity.EXTRA_IS_RECONFIGURE, isReconfigure)
+            candidateWidget?.let {
+                putExtra(WidgetConfigureTrampolineActivity.EXTRA_CANDIDATE_WIDGET, it)
+            }
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
         }
+        val options = createConfigureLaunchOptions()
+        startActivity(intent, options.toBundle())
+        finishWithoutAnimation()
     }
 
     internal fun createConfigureLaunchOptions(): ActivityOptions {
@@ -442,13 +452,6 @@ class WidgetDeckActivity : ComponentActivity() {
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
             )
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                try {
-                    requestFullscreenMode(FULLSCREEN_MODE_REQUEST_ENTER, null)
-                } catch (_: Throwable) {
-                }
-            }
 
             val blurRadius = if (::viewModel.isInitialized) {
                 viewModel.uiState.value.settings.blurRadiusDp
@@ -530,6 +533,25 @@ class WidgetDeckActivity : ComponentActivity() {
             viewModel.markLaunchingInternalFlow(false)
         }
         reassertOverlayPresentation()
+
+        if (io.devnullapps.widgetleaf.BuildConfig.DEBUG) {
+            try {
+                val windowMetrics = windowManager.currentWindowMetrics
+                val bounds = windowMetrics.bounds
+                val inMultiWindow = isInMultiWindowMode
+                val density = resources.displayMetrics.density
+                val widthDp = bounds.width() / density
+                val heightDp = bounds.height() / density
+                val displayMetrics = resources.displayMetrics
+                val displayWidthDp = displayMetrics.widthPixels / density
+                val displayHeightDp = displayMetrics.heightPixels / density
+                android.util.Log.d(
+                    TAG,
+                    "Overlay Diagnostics: isInMultiWindowMode=$inMultiWindow, windowBoundsPx=$bounds (${widthDp.toInt()}x${heightDp.toInt()}dp), displayPx=${displayMetrics.widthPixels}x${displayMetrics.heightPixels} (${displayWidthDp.toInt()}x${displayHeightDp.toInt()}dp)"
+                )
+            } catch (_: Throwable) {
+            }
+        }
     }
 
     override fun onPause() {
@@ -845,6 +867,7 @@ class WidgetDeckActivity : ComponentActivity() {
     }
 
     companion object {
+        const val TAG = "WidgetDeckActivity"
         private const val REQUEST_CODE_CONFIGURE_WIDGET = 4042
         var testContainerOverride: AppContainer? = null
 

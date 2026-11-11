@@ -29,7 +29,7 @@
     - **In-Drag Edge Dwell Page Switching (INV-17):** Holding a dragged widget at the left/right screen edge for ~500ms flips pages mid-drag (repeating every 500ms while holding; leaving edge zone resets timer). Dragging right past the last page creates a speculative new page (shown on HUD via `uiState.effectivePages`); left dwell stops at Page 0. After flip, the dragged widget remains anchored under the pointer; live cascade preview runs on the new page. Dropping commits atomically and prunes empty/speculative pages; Escape/cancel reverts everything to drag-start snapshot and start page. Hoisted into `WidgetEditDragLayer` above `AnimatedContent` (INV-15) with single-parent host view safety (INV-16). Old drop-at-edge bump behavior is removed.
   - **Bottom Pagination Pill:** Circular page loop (`◄` / `►`), page pills (`1 .. N`) with inline right-click/long-press rename, `+` (Widget Picker), and `⚙` (Overlay Settings).
 - **Adding New Widgets (Non-Displacement Rule, INV-19):** Adding a new widget (auto-place or catalog drag-drop) never displaces existing widgets. If the target page is full or the dropped spot overlaps, WidgetLeaf scans the active page, then subsequent pages in order, then appends a new page at the end, evaluating spots in column-major order and navigating to the placed page. Existing widget moves and resizes retain desktop cascade displacement.
-- **Configuration Flow Overlay Preservation (INV-20):** Launching 3rd party widget configuration activities passes explicit `ActivityOptions` (`launchDisplayId`, API 34+ `MODE_BACKGROUND_ACTIVITY_START_ALLOWED`) and re-asserts full-screen overlay presentation (`reassertOverlayPresentation()`, `MATCH_PARENT`, `FLAG_LAYOUT_IN_SCREEN`, `FLAG_LAYOUT_NO_LIMITS`, and Android 14+ `requestFullscreenMode`) without finishing or relaunching, ensuring WidgetLeaf never degrades into a desktop freeform window upon returning from settings.
+- **Configuration Flow Overlay Preservation (INV-20):** Launching 3rd party widget configuration activities is delegated to an isolated trampoline activity (`WidgetConfigureTrampolineActivity`, `taskAffinity="io.devnullapps.widgetleaf.configure"`). `WidgetDeckActivity` finishes prior to external launch, preventing the overlay task from degrading into a desktop freeform window, and relaunches a fresh fullscreen overlay upon configure completion.
 
 ---
 
@@ -89,19 +89,25 @@
 
 ---
 
-## 4. Everyday Commands (Android Linux VM Environment)
+## 4. Everyday Commands (Android Linux VM Environment - 4 GB RAM Guardrails)
 
-Because the workspace resides on `/storage/emulated/10` (`fuse`), **always redirect Gradle's project cache to `$HOME/.cache` (`ext4`)** and run debug/test and release builds in separate Gradle invocations so the `384 MiB` JVM Metaspace is not exhausted:
+Because the Linux VM runs in a fixed 4 GB RAM container and the workspace resides on `/storage/emulated/10` (`fuse`), **always redirect Gradle's project cache to `$HOME/.cache` (`ext4`)**, limit concurrency to 1 worker (`--max-workers=1 --no-parallel`), run `./gradlew --stop` before heavy runs, and execute debug/test and release builds in separate invocations:
 
 ```bash
-# 1. Run all unit & Robolectric Compose UI tests + build Debug APK
-./gradlew testDebugUnitTest assembleDebug \
+# 1. Stop existing Daemons & run Unit + Robolectric Compose UI tests + Jacoco coverage
+./gradlew --stop --project-cache-dir="$HOME/.cache/projects/$(basename "$PWD")-$(pwd -P | sha1sum | cut -c1-8)/gradle" && \
+./gradlew testDebugUnitTest jacocoTestReport assembleDebug \
   --project-cache-dir="$HOME/.cache/projects/$(basename "$PWD")-$(pwd -P | sha1sum | cut -c1-8)/gradle" \
+  -Dorg.gradle.jvmargs="-Xmx640m -XX:MaxMetaspaceSize=384m" \
+  --no-parallel --max-workers=1 \
   --console=plain
 
-# 2. Build signed Release APK (R8 minified + resource shrunk)
+# 2. Stop Daemons & build signed Release APK (R8 minified + resource shrunk)
+./gradlew --stop --project-cache-dir="$HOME/.cache/projects/$(basename "$PWD")-$(pwd -P | sha1sum | cut -c1-8)/gradle" && \
 ./gradlew assembleRelease \
   --project-cache-dir="$HOME/.cache/projects/$(basename "$PWD")-$(pwd -P | sha1sum | cut -c1-8)/gradle" \
+  -Dorg.gradle.jvmargs="-Xmx640m -XX:MaxMetaspaceSize=384m" \
+  --no-parallel --max-workers=1 \
   --console=plain
 
 # 3. Export APKs to shared root for host installation

@@ -35,18 +35,17 @@ object ActiveDisplayLaunchHelper {
     }
 
     /**
-     * Builds an [Intent] targeting [DECK_ACTIVITY_CLASS_NAME] with [FLAG_ACTIVITY_NEW_TASK].
+     * Builds an [Intent] targeting [DECK_ACTIVITY_CLASS_NAME] with [FLAG_ACTIVITY_NEW_TASK] and [FLAG_ACTIVITY_CLEAR_TASK].
      */
     fun createLaunchIntent(context: Context, action: String = ACTION_TOGGLE_DECK): Intent {
         return Intent(action).apply {
             component = ComponentName(context.packageName, DECK_ACTIVITY_CLASS_NAME)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         }
     }
 
     /**
-     * Builds [ActivityOptions] configured with [ActivityOptions.setLaunchDisplayId] for the active display
-     * and fullscreen windowing mode in desktop environments.
+     * Builds [ActivityOptions] configured with [ActivityOptions.setLaunchDisplayId] for the active display.
      */
     fun createLaunchOptions(
         context: Context,
@@ -54,13 +53,6 @@ object ActiveDisplayLaunchHelper {
     ): ActivityOptions {
         val options = ActivityOptions.makeBasic()
         options.launchDisplayId = displayId
-        try {
-            // WindowConfiguration.WINDOWING_MODE_FULLSCREEN = 1
-            val method = ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
-            method.invoke(options, 1)
-        } catch (_: Throwable) {
-            // Ignored if hidden API not accessible
-        }
         return options
     }
 

@@ -655,6 +655,17 @@ fun OverlaySettingsDialog(
                         },
                         testTag = "setting_centered_bento_canvas"
                     )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "WidgetLeaf v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                        color = WidgetLeafTheme.palette.textSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal,
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .testTag("settings_version_footer")
+                    )
                 }
             }
         }

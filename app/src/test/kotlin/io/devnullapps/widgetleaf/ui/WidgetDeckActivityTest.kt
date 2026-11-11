@@ -702,7 +702,7 @@ class WidgetDeckActivityTest {
     }
 
     @Test
-    fun configureResult_resultOk_placesWidgetAndPreservesOverlayWithoutFinishing() {
+    fun configureRequest_launchesTrampolineActivityInIsolatedTaskAndFinishesOverlay() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val intent = Intent(context, WidgetDeckActivity::class.java)
         val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
@@ -718,7 +718,6 @@ class WidgetDeckActivityTest {
                 spanX = 2,
                 spanY = 2
             )
-            activity.viewModel.markLaunchingInternalFlow(true)
             val shadowVm = activity.viewModel
             val requestAction = PendingWidgetAction.RequestConfigure(
                 appWidgetId = 77,
@@ -732,88 +731,54 @@ class WidgetDeckActivityTest {
                 isLaunchingInternalFlow = true,
                 pendingWidgetAction = requestAction
             )
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
 
-            // Deliver RESULT_OK via onActivityResult
-            val resultIntent = Intent().apply {
-                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 77)
-            }
-            val onActivityResultMethod = WidgetDeckActivity::class.java.getDeclaredMethod(
-                "onActivityResult",
-                Int::class.javaPrimitiveType,
-                Int::class.javaPrimitiveType,
-                Intent::class.java
+            // Must finish overlay so overlay task is never converted to freeform desktop window
+            assertThat(activity.isFinishing).isTrue()
+
+            // Must start WidgetConfigureTrampolineActivity in isolated configure task
+            val shadowActivity = Shadows.shadowOf(activity)
+            val nextIntent = shadowActivity.nextStartedActivity
+            assertThat(nextIntent).isNotNull()
+            assertThat(nextIntent.component?.className).isEqualTo(WidgetConfigureTrampolineActivity::class.java.name)
+            assertThat(nextIntent.getIntExtra(WidgetConfigureTrampolineActivity.EXTRA_APPWIDGET_ID, -1)).isEqualTo(77)
+            assertThat(nextIntent.getBooleanExtra(WidgetConfigureTrampolineActivity.EXTRA_IS_RECONFIGURE, false)).isFalse()
+            val passedCandidate = BundleCompatHelper.getSerializable(
+                nextIntent.extras,
+                WidgetConfigureTrampolineActivity.EXTRA_CANDIDATE_WIDGET,
+                PlacedWidget::class.java
             )
-            onActivityResultMethod.isAccessible = true
-            onActivityResultMethod.invoke(activity, 4042, Activity.RESULT_OK, resultIntent)
-
-            // Must NOT finish and relaunch
-            assertThat(activity.isFinishing).isFalse()
-
-            // Overlay layout and flags must be preserved
-            val lp = activity.window.attributes
-            assertThat(lp.width).isEqualTo(ViewGroup.LayoutParams.MATCH_PARENT)
-            assertThat(lp.height).isEqualTo(ViewGroup.LayoutParams.MATCH_PARENT)
-            assertThat((lp.flags and WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN) != 0).isTrue()
-
-            // Internal flow cleared and widget placed
-            assertThat(shadowVm.uiState.value.isLaunchingInternalFlow).isFalse()
-            assertThat(shadowVm.uiState.value.pendingWidgetAction).isNull()
-            val placed = shadowVm.uiState.value.widgets.find { it.appWidgetId == 77 }
-            assertThat(placed).isNotNull()
+            assertThat(passedCandidate).isEqualTo(candidate)
+            assertThat((nextIntent.flags and Intent.FLAG_ACTIVITY_NEW_TASK) != 0).isTrue()
+            assertThat((nextIntent.flags and Intent.FLAG_ACTIVITY_MULTIPLE_TASK) != 0).isTrue()
         } finally {
             tearDownController(controller)
         }
     }
 
     @Test
-    fun configureResult_resultCanceled_preservesOverlayWithoutFinishing() {
+    fun reconfigureWidget_launchesTrampolineWithReconfigureFlagAndFinishesOverlay() {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val intent = Intent(context, WidgetDeckActivity::class.java)
         val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
         try {
             val activity = controller.get()
-            val candidate = PlacedWidget(
-                appWidgetId = 88,
-                providerPackage = "com.config.cancel",
-                providerClass = "CancelWidget",
-                pageIndex = 0,
-                cellX = 0,
-                cellY = 0,
-                spanX = 2,
-                spanY = 2
-            )
-            val shadowVm = activity.viewModel
-            val uiStateField = DeckViewModel::class.java.getDeclaredField("_uiState")
-            uiStateField.isAccessible = true
-            @Suppress("UNCHECKED_CAST")
-            val mutableState = uiStateField.get(shadowVm) as kotlinx.coroutines.flow.MutableStateFlow<DeckUiState>
-            mutableState.value = mutableState.value.copy(
-                isLaunchingInternalFlow = true,
-                pendingWidgetAction = PendingWidgetAction.RequestConfigure(88, candidate)
-            )
-
-            // Deliver RESULT_CANCELED
-            val onActivityResultMethod = WidgetDeckActivity::class.java.getDeclaredMethod(
-                "onActivityResult",
+            val launchMethod = WidgetDeckActivity::class.java.getDeclaredMethod(
+                "launchWidgetConfigurationTrampoline",
                 Int::class.javaPrimitiveType,
-                Int::class.javaPrimitiveType,
-                Intent::class.java
+                PlacedWidget::class.java,
+                Boolean::class.javaPrimitiveType
             )
-            onActivityResultMethod.isAccessible = true
-            onActivityResultMethod.invoke(activity, 4042, Activity.RESULT_CANCELED, null)
+            launchMethod.isAccessible = true
+            launchMethod.invoke(activity, 99, null, true)
 
-            // Must NOT finish
-            assertThat(activity.isFinishing).isFalse()
-
-            // Overlay flags preserved
-            val lp = activity.window.attributes
-            assertThat((lp.flags and WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN) != 0).isTrue()
-
-            // State cleaned up and widget NOT placed
-            assertThat(shadowVm.uiState.value.isLaunchingInternalFlow).isFalse()
-            assertThat(shadowVm.uiState.value.pendingWidgetAction).isNull()
-            val placed = shadowVm.uiState.value.widgets.find { it.appWidgetId == 88 }
-            assertThat(placed).isNull()
+            assertThat(activity.isFinishing).isTrue()
+            val shadowActivity = Shadows.shadowOf(activity)
+            val nextIntent = shadowActivity.nextStartedActivity
+            assertThat(nextIntent).isNotNull()
+            assertThat(nextIntent.component?.className).isEqualTo(WidgetConfigureTrampolineActivity::class.java.name)
+            assertThat(nextIntent.getIntExtra(WidgetConfigureTrampolineActivity.EXTRA_APPWIDGET_ID, -1)).isEqualTo(99)
+            assertThat(nextIntent.getBooleanExtra(WidgetConfigureTrampolineActivity.EXTRA_IS_RECONFIGURE, false)).isTrue()
         } finally {
             tearDownController(controller)
         }

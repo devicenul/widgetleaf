@@ -87,9 +87,16 @@
 
 ## 4. Build & Test Environment Invariants (Android Linux VM)
 
-### INV-9: Redirect Gradle Cache to `$HOME/.cache` & Split Debug/Release Invocations
-- **Rule:** Always pass `--project-cache-dir="$HOME/.cache/projects/$(basename "$PWD")-$(pwd -P | sha1sum | cut -c1-8)/gradle"` to `./gradlew`.
-- Run `testDebugUnitTest assembleDebug` and `assembleRelease` in separate `./gradlew` invocations so the Gradle Daemon (`384 MiB` MaxMetaspaceSize) does not run out of Metaspace mid-build.
+### INV-9: 4 GB Linux VM RAM Guardrails & Cache Redirection
+- **Why:** The Linux VM inside the Android Terminal environment has a fixed default total memory of ~3.9 GB (~4 GB). If multiple Gradle processes, parallel workers, or unbounded test forks run simultaneously, memory drops below ~50 MB, causing kernel `kswapd0` thrashing and multi-hour unrecoverable hangs.
+- **Rule:**
+  1. **Cache Redirection:** Always pass `--project-cache-dir="$HOME/.cache/projects/$(basename "$PWD")-$(pwd -P | sha1sum | cut -c1-8)/gradle"` to `./gradlew`.
+  2. **Worker & Concurrency Limits:** Always append `--no-parallel --max-workers=1` and `-Dorg.gradle.jvmargs="-Xmx640m -XX:MaxMetaspaceSize=384m"`.
+  3. **Test Process Bounds:** Keep test tasks configured with `maxParallelForks = 1` and capped `jvmArgs("-Xmx512m", "-XX:MaxMetaspaceSize=256m")` (or `maxHeapSize = "512m"`).
+  4. **Stop Daemons Between Heavy Runs:** Always run `./gradlew --stop` (with the project cache dir) before heavy builds or test suites to release expired daemons.
+  5. **Targeted Iteration:** While iterating, run only the relevant test classes using `--tests <pattern>`, reserving full-suite runs and JaCoCo reports for final verification.
+  6. **Split Invocations:** Execute `testDebugUnitTest jacocoTestReport assembleDebug` and `assembleRelease` in separate `./gradlew` commands to prevent Metaspace and heap exhaustion.
+  7. **Hang Recovery:** If any Gradle execution shows zero progress for >15 minutes, check `free -m` and kill runaway Gradle/JVM processes immediately.
 
 ### INV-10: Detach `ComposeView` in Robolectric Activity Tests Before `destroy()`
 - **Why:** In Robolectric, destroying a `ComponentActivity` (`WidgetDeckActivityTest`) without detaching its `ComposeView` and idling the main looper can leave a stale `AndroidComposeView` registered in `ComposeRootRegistry`, causing subsequent `createComposeRule()` tests (`DeckScreenComposeTest`) in the same JVM to fail with `AppNotIdleException`.
@@ -157,18 +164,17 @@
   5. **Auto-Navigation:** The overlay automatically navigates to the page where the new widget was placed (`activePageIndex = candidate.pageIndex`) so the user immediately sees it.
   6. **Existing Widgets Cascade:** Moving and resizing *existing* placed widgets continues to use `CascadeDisplacementResolver`.
 
-### INV-20: Widget Configuration Flow Overlay Preservation & Windowing Mode
-- **Why:** On Android Desktop environments (Android 14/15 Desktop Mode, ChromeOS ARC-VM, Googlebook), launching a 3rd party widget configuration Activity (e.g. Clock or nzb360) places the external activity in a desktop freeform window. If the host activity does not manage launch options or re-assert its windowing state, the system restores the caller in a freeform desktop window container with title bar decorations and bounded coordinates instead of the top-layer full-screen frosted glass overlay.
+### INV-20: Widget Configuration Flow Isolation via Trampoline Task (`WidgetConfigureTrampolineActivity`)
+- **Why:** On Android Desktop environments (Android 14/15/16 Desktop Mode, ChromeOS ARC-VM, Googlebook), launching a 3rd-party widget configuration activity (e.g. Clock or nzb360) places the external activity in a desktop freeform window container with caption and window controls. If launched directly from `WidgetDeckActivity` or within its task, the WindowManager irrevocably transitions the entire task into `WINDOWING_MODE_FREEFORM`. Window-level re-assertions (`setLayout(MATCH_PARENT)`, window flags, or `requestFullscreenMode`) are ignored or rejected by desktop mode, leaving WidgetLeaf trapped in a bordered floating window upon return.
 - **Rule:**
-  1. **Configure Launch Options:** `launchWidgetConfigurationActivity` MUST supply explicit `ActivityOptions` with `launchDisplayId = getActiveDisplayId(context)` and API 34+ `setPendingIntentBackgroundActivityStartMode(MODE_BACKGROUND_ACTIVITY_START_ALLOWED)`. It MUST keep `intentFlags = 0` (never inject `FLAG_ACTIVITY_NEW_TASK`, which breaks task token result routing and causes immediate `RESULT_CANCELED`).
-  2. **Isolated Task Affinity:** `WidgetDeckActivity` declares `android:taskAffinity="io.devnullapps.widgetleaf.overlay"` to prevent external activities from sharing or mutating its root task affinity.
-  3. **No Finish & Relaunch:** `WidgetDeckActivity` MUST NOT finish and relaunch itself upon receiving configuration results. The live activity instance is preserved across `onActivityResult`.
-  4. **Active Presentation Re-Assertion:** `WidgetDeckActivity.reassertOverlayPresentation()` actively re-asserts:
-     - `window.setLayout(MATCH_PARENT, MATCH_PARENT)` and `setDecorFitsSystemWindows(false)`;
-     - `FLAG_LAYOUT_IN_SCREEN` and `FLAG_LAYOUT_NO_LIMITS`;
-     - API 34+ `requestFullscreenMode(FULLSCREEN_MODE_REQUEST_ENTER, null)` to exit desktop freeform window mode and restore full-screen overlay;
-     - Blur attachment via `blurController.attachToWindow` and recents exclusion via `taskbarPlacementManager.syncRunningTaskbarPresence`.
-  5. **Lifecycle Re-Assertion Points:** `reassertOverlayPresentation()` is invoked in `onCreate()`, `onResume()`, and immediately in `onActivityResult()` when `REQUEST_CODE_CONFIGURE_WIDGET` completes (both on `RESULT_OK` and `RESULT_CANCELED`).
+  1. **Dedicated Trampoline Activity:** All 3rd-party widget configuration flows (both adding new configurable widgets and reconfiguring existing widgets) MUST be delegated to `WidgetConfigureTrampolineActivity`, an invisible activity declared with an isolated task affinity (`android:taskAffinity="io.devnullapps.widgetleaf.configure"`), `android:excludeFromRecents="true"`, and `android:theme="@style/Theme.WidgetLeaf.Trampoline"`.
+  2. **Overlay Exit Before External Launch:** When configuration is required, `WidgetDeckActivity` starts `WidgetConfigureTrampolineActivity` with `FLAG_ACTIVITY_NEW_TASK or FLAG_ACTIVITY_MULTIPLE_TASK` and explicit `ActivityOptions` (`launchDisplayId`, API 34+ `setPendingIntentBackgroundActivityStartMode(MODE_BACKGROUND_ACTIVITY_START_ALLOWED)`), and immediately finishes via `finishWithoutAnimation()`. This ensures the overlay task is cleanly destroyed rather than degraded to freeform mode.
+  3. **Direct Placement Finalization:** `WidgetConfigureTrampolineActivity` receives the pending `appWidgetId`, `candidateWidget`, and `isReconfigure` flags. It starts the external configure activity for result (`startAppWidgetConfigureActivityForResult`).
+     - On `RESULT_OK`: for a new widget, it transactionally persists the candidate to the Room database via `repository.replaceDeckState`, updates `lastViewedPageIndex`, and relaunches the overlay. For reconfiguring an existing widget, it directly relaunches the overlay.
+     - On `RESULT_CANCELED`: for a new widget, it deletes the allocated `appWidgetId` via `widgetHostGateway.deleteAppWidgetId`, does not write to the repository, and relaunches the overlay.
+  4. **Clean Fullscreen Overlay Relaunch:** The overlay is relaunched using `ActiveDisplayLaunchHelper.launchOverlay(context, ACTION_TOGGLE_DECK)`, which builds an intent targeting `WidgetDeckActivity` with `FLAG_ACTIVITY_NEW_TASK or FLAG_ACTIVITY_CLEAR_TASK` on the active display. This creates a brand-new top-layer fullscreen overlay instance identical to an initial launch from the top bar or hotkey.
+  5. **Play Protect / Policy Hygiene:** No hidden reflection APIs (such as `@hide setLaunchWindowingMode`) are used.
+  6. **Overlay Presentation & Diagnostics:** `WidgetDeckActivity.reassertOverlayPresentation()` enforces `MATCH_PARENT`, `FLAG_LAYOUT_IN_SCREEN`, `FLAG_LAYOUT_NO_LIMITS`, blur, and taskbar exclusion. In debug builds, `onResume()` logs multi-window mode, window bounds, and display metrics for diagnostics.
 
 
 

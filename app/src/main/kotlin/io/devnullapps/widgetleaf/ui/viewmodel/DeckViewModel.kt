@@ -640,6 +640,8 @@ class DeckViewModel(
         }
 
         val updatedWidgets = resolvedWidgets ?: (baseWidgets.filter { it.appWidgetId != candidate.appWidgetId } + candidate)
+        rawPersistedWidgets = updatedWidgets
+        rawPersistedPages = newPages
 
         // Derive displayed state from the updated raw layout for current window profile
         val (displayedPages, displayedWidgets) = deriveDisplayedState(updatedWidgets, newPages, profile)
@@ -989,6 +991,8 @@ class DeckViewModel(
                 pages = basePages,
                 widgets = result.widgets
             )
+            rawPersistedWidgets = prunedWidgets
+            rawPersistedPages = prunedPages
             val finalPageIndex = prunedWidgets.find { it.appWidgetId == appWidgetId }?.pageIndex ?: activePage
 
             val (displayedPages, displayedWidgets) = deriveDisplayedState(prunedWidgets, prunedPages, currentProfile)
@@ -1023,9 +1027,11 @@ class DeckViewModel(
         dragDebounceJob?.cancel()
         dragDebounceJob = null
         dragSessionToken++
-        val basePages = rawPersistedPages.ifEmpty { _uiState.value.pages }
-        val restorePages = dragSnapshotPages ?: basePages
-        val restorePageIndex = dragStartPageIndex ?: _uiState.value.activePageIndex
+
+        val snapshotWidgets = dragSnapshotWidgets
+        val snapshotPages = dragSnapshotPages
+        val restorePageIndex = dragStartPageIndex
+
         dragSnapshotWidgets = null
         dragSnapshotPages = null
         dragSnapshotPageCount = 0
@@ -1033,25 +1039,50 @@ class DeckViewModel(
         draggingWidgetStartCell = null
         resizingWidgetStartBounds = null
 
-        val (displayedPages, displayedWidgets) = deriveDisplayedState(
-            rawPersistedWidgets,
-            restorePages,
-            _uiState.value.gridProfile
-        )
-
-        _uiState.update { current ->
-            current.copy(
-                pages = displayedPages,
-                widgets = displayedWidgets,
-                activePageIndex = restorePageIndex.coerceIn(0, displayedPages.lastIndex),
-                previewWidgets = null,
-                previewPageCount = null,
-                displacedWidgetIds = emptySet(),
-                draggingWidgetId = null,
-                resizingWidgetId = null,
-                dragStartPageIndex = null,
-                hoveredCell = null
+        if (snapshotWidgets != null || snapshotPages != null) {
+            val basePages = snapshotPages ?: rawPersistedPages.ifEmpty { _uiState.value.pages }
+            val baseWidgets = snapshotWidgets ?: rawPersistedWidgets.ifEmpty { _uiState.value.widgets }
+            val (displayedPages, displayedWidgets) = deriveDisplayedState(
+                baseWidgets,
+                basePages,
+                _uiState.value.gridProfile
             )
+            val targetIndex = (restorePageIndex ?: _uiState.value.activePageIndex).coerceIn(0, displayedPages.lastIndex)
+            _uiState.update { current ->
+                current.copy(
+                    pages = displayedPages,
+                    widgets = displayedWidgets,
+                    activePageIndex = targetIndex,
+                    previewWidgets = null,
+                    previewPageCount = null,
+                    displacedWidgetIds = emptySet(),
+                    draggingWidgetId = null,
+                    resizingWidgetId = null,
+                    dragStartPageIndex = null,
+                    hoveredCell = null
+                )
+            }
+        } else {
+            _uiState.update { current ->
+                if (current.previewWidgets != null ||
+                    current.draggingWidgetId != null ||
+                    current.resizingWidgetId != null ||
+                    current.displacedWidgetIds.isNotEmpty() ||
+                    current.hoveredCell != null
+                ) {
+                    current.copy(
+                        previewWidgets = null,
+                        previewPageCount = null,
+                        displacedWidgetIds = emptySet(),
+                        draggingWidgetId = null,
+                        resizingWidgetId = null,
+                        dragStartPageIndex = null,
+                        hoveredCell = null
+                    )
+                } else {
+                    current
+                }
+            }
         }
     }
 
@@ -1089,6 +1120,9 @@ class DeckViewModel(
         while (newPages.size < result.pageCount) {
             newPages.add(DeckPage(pageIndex = newPages.size, customLabel = null))
         }
+
+        rawPersistedWidgets = result.widgets
+        rawPersistedPages = newPages
 
         val (displayedPages, displayedWidgets) = deriveDisplayedState(result.widgets, newPages, currentProfile)
 
@@ -1176,6 +1210,8 @@ class DeckViewModel(
                 pages = basePages,
                 widgets = result.widgets
             )
+            rawPersistedWidgets = prunedWidgets
+            rawPersistedPages = prunedPages
             val finalPageIndex = prunedWidgets.find { it.appWidgetId == appWidgetId }?.pageIndex ?: activePage
 
             val (displayedPages, displayedWidgets) = deriveDisplayedState(prunedWidgets, prunedPages, currentProfile)
@@ -1239,6 +1275,8 @@ class DeckViewModel(
 
         when (result) {
             is EdgeTransferResult.Success -> {
+                rawPersistedWidgets = result.widgets
+                rawPersistedPages = result.pages
                 val targetIndex = result.targetPageIndex.coerceIn(0, result.pages.lastIndex)
                 val (displayedPages, displayedWidgets) = deriveDisplayedState(result.widgets, result.pages, currentProfile)
                 _uiState.update {
@@ -1282,6 +1320,8 @@ class DeckViewModel(
             basePages,
             remainingWidgets
         )
+        rawPersistedWidgets = reindexedWidgets
+        rawPersistedPages = prunedPages
         val (displayedPages, displayedWidgets) = deriveDisplayedState(
             reindexedWidgets,
             prunedPages,
