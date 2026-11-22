@@ -2,28 +2,36 @@ package io.devnullapps.widgetleaf.ui
 
 import android.app.Activity
 import android.os.Bundle
+import android.view.Display
 import io.devnullapps.widgetleaf.services.ActiveDisplayLaunchHelper
+import io.devnullapps.widgetleaf.services.WidgetLeafTopBarService
 
 /**
- * Lightweight shortcut entry point (`Theme.NoDisplay`) that toggles the WidgetLeaf overlay
- * and finishes immediately.
+ * Lightweight shortcut entry point (`Theme.NoDisplay`) that toggles or routes the WidgetLeaf overlay
+ * onto the active display and finishes immediately.
  *
- * Exposes a dedicated target in Android's system Keyboard Shortcuts customizer
- * (`Settings > System > Keyboard > Customize keyboard shortcuts` / `Action + /`),
- * matching the pattern used by BentoBar's `BarMenuActivity`.
+ * Used both by Android's Keyboard Shortcuts customizer (`Action + /`) and ongoing status bar
+ * notification triggers so active-display routing is evaluated live at invocation time.
  */
 class ToggleDeckShortcutActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val active = WidgetDeckActivity.activeInstance
-        if (active != null && !active.isFinishing && WidgetDeckActivity.isDeckVisible) {
-            active.finish()
-        } else {
-            ActiveDisplayLaunchHelper.launchOverlay(
-                this,
-                ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
-            )
+        val action = intent?.action ?: ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
+        val ownDisplayId = ActiveDisplayLaunchHelper.getActiveDisplayId(this)
+        val serviceDisplayId = WidgetLeafTopBarService.instance?.let {
+            ActiveDisplayLaunchHelper.getActiveDisplayId(it)
         }
+        val targetDisplayId = if (ownDisplayId != Display.DEFAULT_DISPLAY) {
+            ownDisplayId
+        } else {
+            serviceDisplayId ?: ownDisplayId
+        }
+
+        ActiveDisplayLaunchHelper.toggleOrLaunchOverlay(
+            context = this,
+            displayId = targetDisplayId,
+            action = action
+        )
         finish()
     }
 }

@@ -1,12 +1,17 @@
 package io.devnullapps.widgetleaf.services
 
+import android.accessibilityservice.AccessibilityService
+import android.app.Application
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.StatusBarManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Rect
 import android.os.Build
+import android.os.Looper
 import android.service.quicksettings.Tile
+import android.view.accessibility.AccessibilityWindowInfo
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import io.devnullapps.widgetleaf.R
@@ -121,5 +126,46 @@ class WidgetDeckTileServiceTest {
 
         statusBarTriggerManager.syncStatusBarTrigger(false)
         assertThat(statusBarTriggerManager.isNotificationShown()).isFalse()
+    }
+
+    @Test
+    fun tileServiceOnClickRoutesToActiveDisplayFromAccessibilityService() {
+        val topBarController = Robolectric.buildService(WidgetLeafTopBarService::class.java)
+        val topBarService = topBarController.create().get()
+        topBarService.onServiceConnected()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val tileController = Robolectric.buildService(WidgetDeckTileService::class.java).create()
+        val tileService = tileController.get()
+
+        try {
+            val focusedOnDisplay3 = AccessibilityWindowInfo.obtain().also { win ->
+                val s = shadowOf(win)
+                s.setId(401)
+                s.setDisplayId(3)
+                s.setType(AccessibilityWindowInfo.TYPE_APPLICATION)
+                s.setFocused(true)
+                s.setActive(true)
+                s.setBoundsInScreen(Rect(0, 0, 1920, 1080))
+            }
+            shadowOf(topBarService as AccessibilityService).setWindowsOnDisplay(3, listOf(focusedOnDisplay3))
+
+            tileService.onClick()
+            assertThat(tileService.lastLaunchedDisplayId).isEqualTo(3)
+        } finally {
+            topBarController.destroy()
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+    }
+
+    @Test
+    fun statusBarTriggerNotificationTargetsToggleDeckShortcutActivityForDynamicDisplayResolution() {
+        statusBarTriggerManager.showTriggerNotification()
+        val notifications = shadowOf(notificationManager).allNotifications
+        assertThat(notifications).hasSize(1)
+
+        val contentIntent = shadowOf(notifications[0].contentIntent).savedIntent
+        assertThat(contentIntent.action).isEqualTo(ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK)
+        assertThat(contentIntent.component?.className).isEqualTo(ActiveDisplayLaunchHelper.SHORTCUT_ACTIVITY_CLASS_NAME)
     }
 }

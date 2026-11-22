@@ -46,19 +46,19 @@ open class StatusBarTriggerManager(
     open fun showTriggerNotification() {
         createChannelIfNeeded()
 
-        val togglePendingIntent = ActiveDisplayLaunchHelper.createLaunchPendingIntent(
+        val togglePendingIntent = ActiveDisplayLaunchHelper.createShortcutPendingIntent(
             context = context,
             action = ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK,
             requestCode = REQUEST_CODE_TOGGLE
         )
 
-        val addWidgetPendingIntent = ActiveDisplayLaunchHelper.createLaunchPendingIntent(
+        val addWidgetPendingIntent = ActiveDisplayLaunchHelper.createShortcutPendingIntent(
             context = context,
             action = ActiveDisplayLaunchHelper.ACTION_OPEN_WIDGET_PICKER,
             requestCode = REQUEST_CODE_ADD_WIDGET
         )
 
-        val settingsPendingIntent = ActiveDisplayLaunchHelper.createLaunchPendingIntent(
+        val settingsPendingIntent = ActiveDisplayLaunchHelper.createShortcutPendingIntent(
             context = context,
             action = ActiveDisplayLaunchHelper.ACTION_OPEN_OVERLAY_SETTINGS,
             requestCode = REQUEST_CODE_SETTINGS

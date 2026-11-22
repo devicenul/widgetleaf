@@ -11,12 +11,14 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.hardware.display.DisplayManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
+import android.view.Display
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -29,7 +31,6 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import io.devnullapps.widgetleaf.R
 import io.devnullapps.widgetleaf.domain.model.OverlaySettings
-import io.devnullapps.widgetleaf.ui.WidgetDeckActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -38,29 +39,72 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * Lightweight desktop top-bar overlay & global hotkey service for Googlebook / Android Desktop.
+ * Multi-display desktop top-bar overlay & global hotkey service for Googlebook / Android Desktop.
  *
- * Draws a small, native status-bar-style leaf icon inside the desktop status bar's
- * `DesktopStatusBarSpacer` region on either the Left or Right, coexisting side-by-side with
- * BentoBar (`com.meridian11.books.bentobar`) without overlap, and intercepts the user's global
- * hotkey to toggle the widget pane from any app.
+ * Maintains an independent `TYPE_ACCESSIBILITY_OVERLAY` leaf pill per logical display via
+ * [DisplayManager.DisplayListener] and per-display `createDisplayContext(display).createWindowContext(...)`,
+ * coexisting with BentoBar and avoiding display cutouts, while hiding the floating leaf on any display
+ * that has no top status bar (e.g. bottom-taskbar-only shells). Intercepts the global hotkey and routes
+ * launches to the active display.
  */
 class WidgetLeafTopBarService : AccessibilityService() {
+
+    internal data class DisplayTopBarEntry(
+        val displayId: Int,
+        val windowContext: Context,
+        val windowManager: WindowManager,
+        val stripContainer: FrameLayout,
+        val hoverPillBg: GradientDrawable,
+        val iconView: ImageView,
+        val layoutParams: WindowManager.LayoutParams,
+        val density: Float,
+        var isWindowAttached: Boolean = false
+    )
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private lateinit var windowManager: WindowManager
     private lateinit var keyguardManager: KeyguardManager
     private lateinit var powerManager: PowerManager
+    private var displayManager: DisplayManager? = null
 
     internal var currentSettings: OverlaySettings = OverlaySettings()
-    internal var stripContainer: FrameLayout? = null
-    private var hoverPillBg: GradientDrawable? = null
-    private var iconView: ImageView? = null
-    internal var layoutParams: WindowManager.LayoutParams? = null
-    private var isWindowAttached = false
+    internal val displayWindows = mutableMapOf<Int, DisplayTopBarEntry>()
+
+    internal val stripContainer: FrameLayout?
+        get() = displayWindows[Display.DEFAULT_DISPLAY]?.stripContainer
+
+    internal val layoutParams: WindowManager.LayoutParams?
+        get() = displayWindows[Display.DEFAULT_DISPLAY]?.layoutParams
+
     private var lastHotkeyToggleUptimeMs: Long = -10_000L
+
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {
+            syncDisplays()
+            displayWindows[displayId]?.let { refreshTopBarPlacementForDisplay(it) }
+            scheduleSettlingRescans()
+        }
+
+        override fun onDisplayRemoved(displayId: Int) {
+            removeDisplayEntry(displayId)
+        }
+
+        override fun onDisplayChanged(displayId: Int) {
+            val display = displayManager?.getDisplay(displayId)
+            if (display == null) {
+                removeDisplayEntry(displayId)
+                return
+            }
+            val existing = displayWindows[displayId]
+            val probeDensity = createPerDisplayWindowContext(display).first.resources.displayMetrics.density
+            if (existing == null || existing.density != probeDensity) {
+                ensureDisplayWindowAttached(display)
+            }
+            displayWindows[displayId]?.let { refreshTopBarPlacementForDisplay(it) }
+            scheduleSettlingRescans()
+        }
+    }
 
     private val rescanRunnable = Runnable {
         refreshTopBarPlacement()
@@ -78,9 +122,13 @@ class WidgetLeafTopBarService : AccessibilityService() {
     public override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        windowManager = getSystemService(WindowManager::class.java)
         keyguardManager = getSystemService(KeyguardManager::class.java)
         powerManager = getSystemService(PowerManager::class.java)
+        displayManager = getSystemService(DisplayManager::class.java)?.also { dm ->
+            dm.registerDisplayListener(displayListener, mainHandler)
+        }
+
+        syncDisplays()
 
         serviceScope.launch {
             DefaultServicesContainer.getPreferencesDataStore(applicationContext)
@@ -111,15 +159,11 @@ class WidgetLeafTopBarService : AccessibilityService() {
             }
             lastHotkeyToggleUptimeMs = now
 
-            val active = WidgetDeckActivity.activeInstance
-            if (active != null && !active.isFinishing && WidgetDeckActivity.isDeckVisible) {
-                active.finish()
-            } else {
-                ActiveDisplayLaunchHelper.launchOverlay(
-                    this,
-                    ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
-                )
-            }
+            val targetDisplayId = ActiveDisplayLaunchHelper.getActiveDisplayId(this)
+            launchOrToggleOverlayOnDisplay(
+                displayId = targetDisplayId,
+                action = ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
+            )
             return true
         }
         return false
@@ -127,6 +171,7 @@ class WidgetLeafTopBarService : AccessibilityService() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        syncDisplays()
         updateIconTintForConfiguration()
         scheduleSettlingRescans()
     }
@@ -148,7 +193,11 @@ class WidgetLeafTopBarService : AccessibilityService() {
             instance = null
         }
         mainHandler.removeCallbacksAndMessages(null)
-        detachWindowIfNeeded()
+        try {
+            displayManager?.unregisterDisplayListener(displayListener)
+        } catch (_: Throwable) {
+        }
+        detachAllWindows()
         serviceScope.cancel()
     }
 
@@ -159,14 +208,82 @@ class WidgetLeafTopBarService : AccessibilityService() {
     }
 
     internal fun updateStripVisibilityAndPosition() {
-        ensureWindowAttached()
+        syncDisplays()
         refreshTopBarPlacement()
     }
 
-    private fun ensureWindowAttached() {
-        if (isWindowAttached && stripContainer != null) return
+    internal fun syncDisplays() {
+        val dm = displayManager ?: getSystemService(DisplayManager::class.java).also { displayManager = it }
+        val displays = try {
+            dm?.getDisplays()?.filter {
+                it.displayId != Display.INVALID_DISPLAY &&
+                    (it.flags and Display.FLAG_PRIVATE) == 0
+            }.orEmpty()
+        } catch (_: Throwable) {
+            emptyList()
+        }
 
-        val density = resources.displayMetrics.density
+        val activeIds = displays.map { it.displayId }.toSet()
+        val staleIds = displayWindows.keys.filter { it !in activeIds }
+        for (staleId in staleIds) {
+            removeDisplayEntry(staleId)
+        }
+
+        if (displays.isEmpty() && !displayWindows.containsKey(Display.DEFAULT_DISPLAY)) {
+            val fallbackWm = getSystemService(WindowManager::class.java) ?: return
+            attachEntryForContext(
+                displayId = Display.DEFAULT_DISPLAY,
+                windowContext = this,
+                perDisplayWm = fallbackWm
+            )
+            return
+        }
+
+        for (display in displays) {
+            ensureDisplayWindowAttached(display)
+        }
+    }
+
+    private fun createPerDisplayWindowContext(display: Display): Pair<Context, WindowManager> {
+        val displayContext = try {
+            createDisplayContext(display)
+        } catch (_: Throwable) {
+            this
+        }
+        val windowContext = try {
+            displayContext.createWindowContext(
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                null
+            )
+        } catch (_: Throwable) {
+            displayContext
+        }
+        val perDisplayWm = windowContext.getSystemService(WindowManager::class.java)
+            ?: displayContext.getSystemService(WindowManager::class.java)
+            ?: getSystemService(WindowManager::class.java)
+        return Pair(windowContext, perDisplayWm)
+    }
+
+    private fun ensureDisplayWindowAttached(display: Display) {
+        val displayId = display.displayId
+        val (windowContext, perDisplayWm) = createPerDisplayWindowContext(display)
+        val density = windowContext.resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
+        val existing = displayWindows[displayId]
+        if (existing != null && existing.isWindowAttached && existing.density == density) {
+            return
+        }
+        if (existing != null) {
+            removeDisplayEntry(displayId)
+        }
+        attachEntryForContext(displayId, windowContext, perDisplayWm)
+    }
+
+    private fun attachEntryForContext(
+        displayId: Int,
+        windowContext: Context,
+        perDisplayWm: WindowManager
+    ) {
+        val density = windowContext.resources.displayMetrics.density.takeIf { it > 0f } ?: 1f
         val slotWidthPx = (28 * density).toInt()
         val glyphSizePx = (16 * density).toInt()
         val hoverHeightPx = (22 * density).toInt()
@@ -176,17 +293,14 @@ class WidgetLeafTopBarService : AccessibilityService() {
             cornerRadius = 11f * density
             setColor(Color.TRANSPARENT)
         }
-        hoverPillBg = hoverBg
 
-        val leafGlyph = ImageView(this).apply {
+        val leafGlyph = ImageView(windowContext).apply {
             setImageResource(R.drawable.ic_qs_tile_leaf)
             setColorFilter(Color.WHITE)
             scaleType = ImageView.ScaleType.FIT_CENTER
         }
-        iconView = leafGlyph
-        updateIconTintForConfiguration()
 
-        val hoverFrame = FrameLayout(this).apply {
+        val hoverFrame = FrameLayout(windowContext).apply {
             background = hoverBg
             addView(
                 leafGlyph,
@@ -194,22 +308,23 @@ class WidgetLeafTopBarService : AccessibilityService() {
             )
         }
 
-        val rootContainer = FrameLayout(this).apply {
+        val rootContainer = FrameLayout(windowContext).apply {
             contentDescription = getString(R.string.app_name)
+            visibility = View.INVISIBLE
             addView(
                 hoverFrame,
                 FrameLayout.LayoutParams(slotWidthPx, hoverHeightPx, Gravity.CENTER)
             )
             setOnClickListener {
-                ActiveDisplayLaunchHelper.launchOverlay(
-                    this@WidgetLeafTopBarService,
-                    ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
+                launchOrToggleOverlayOnDisplay(
+                    displayId = displayId,
+                    action = ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
                 )
             }
             setOnLongClickListener {
-                ActiveDisplayLaunchHelper.launchOverlay(
-                    this@WidgetLeafTopBarService,
-                    ActiveDisplayLaunchHelper.ACTION_OPEN_OVERLAY_SETTINGS
+                launchOrToggleOverlayOnDisplay(
+                    displayId = displayId,
+                    action = ActiveDisplayLaunchHelper.ACTION_OPEN_OVERLAY_SETTINGS
                 )
                 true
             }
@@ -228,9 +343,9 @@ class WidgetLeafTopBarService : AccessibilityService() {
                 val isSecondary = (event.buttonState and MotionEvent.BUTTON_SECONDARY) != 0 ||
                     (event.actionButton == MotionEvent.BUTTON_SECONDARY)
                 if (isSecondary && event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS) {
-                    ActiveDisplayLaunchHelper.launchOverlay(
-                        this@WidgetLeafTopBarService,
-                        ActiveDisplayLaunchHelper.ACTION_OPEN_OVERLAY_SETTINGS
+                    launchOrToggleOverlayOnDisplay(
+                        displayId = displayId,
+                        action = ActiveDisplayLaunchHelper.ACTION_OPEN_OVERLAY_SETTINGS
                     )
                     true
                 } else {
@@ -239,9 +354,15 @@ class WidgetLeafTopBarService : AccessibilityService() {
             }
         }
 
-        val insetTop = windowManager.currentWindowMetrics.windowInsets
-            .getInsetsIgnoringVisibility(WindowInsets.Type.statusBars())
-            .top
+        val insetTop = try {
+            val wi = perDisplayWm.currentWindowMetrics.windowInsets
+            maxOf(
+                wi.getInsets(WindowInsets.Type.statusBars()).top,
+                wi.getInsetsIgnoringVisibility(WindowInsets.Type.statusBars()).top
+            )
+        } catch (_: Throwable) {
+            0
+        }
         val initialHeightPx = if (insetTop > 0) insetTop else (36 * density).toInt()
 
         val params = WindowManager.LayoutParams(
@@ -259,28 +380,55 @@ class WidgetLeafTopBarService : AccessibilityService() {
             y = 0
             layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-            title = StatusBarSpaceScanner.WIDGET_LEAF_WINDOW_TITLE
+            title = "${StatusBarSpaceScanner.WIDGET_LEAF_WINDOW_TITLE}:$displayId"
         }
 
-        try {
-            windowManager.addView(rootContainer, params)
-            stripContainer = rootContainer
-            layoutParams = params
-            isWindowAttached = true
-        } catch (_: Throwable) {
+        val entry = DisplayTopBarEntry(
+            displayId = displayId,
+            windowContext = windowContext,
+            windowManager = perDisplayWm,
+            stripContainer = rootContainer,
+            hoverPillBg = hoverBg,
+            iconView = leafGlyph,
+            layoutParams = params,
+            density = density,
             isWindowAttached = false
+        )
+
+        try {
+            perDisplayWm.addView(rootContainer, params)
+            entry.isWindowAttached = true
+            displayWindows[displayId] = entry
+        } catch (_: Throwable) {
+            entry.isWindowAttached = false
         }
+    }
+
+    internal fun launchOrToggleOverlayOnDisplay(displayId: Int, action: String) {
+        ActiveDisplayLaunchHelper.toggleOrLaunchOverlay(
+            context = this,
+            displayId = displayId,
+            action = action
+        )
     }
 
     private fun updateIconTintForConfiguration() {
         // Desktop top bar uses crisp white status bar glyphs
-        iconView?.setColorFilter(Color.WHITE)
+        for (entry in displayWindows.values) {
+            entry.iconView.setColorFilter(Color.WHITE)
+        }
     }
 
     internal fun refreshTopBarPlacement() {
-        val container = stripContainer ?: return
-        val params = layoutParams ?: return
-        if (!isWindowAttached) {
+        for (entry in displayWindows.values.toList()) {
+            refreshTopBarPlacementForDisplay(entry)
+        }
+    }
+
+    internal fun refreshTopBarPlacementForDisplay(entry: DisplayTopBarEntry) {
+        val container = entry.stripContainer
+        val params = entry.layoutParams
+        if (!entry.isWindowAttached) {
             container.visibility = View.INVISIBLE
             return
         }
@@ -290,11 +438,17 @@ class WidgetLeafTopBarService : AccessibilityService() {
             return
         }
 
-        val density = resources.displayMetrics.density
+        val density = entry.density
         val gapPx = (6 * density).toInt()
         val itemWidthPx = (28 * density).toInt()
 
-        val scanResult = StatusBarSpaceScanner.scan(this, windowManager)
+        val scanResult = StatusBarSpaceScanner.scan(
+            service = this,
+            windowManager = entry.windowManager,
+            displayId = entry.displayId,
+            density = density
+        )
+
         if (scanResult != null) {
             if (scanResult.shouldHideForFullscreenOrSystemPanel) {
                 container.visibility = View.INVISIBLE
@@ -308,8 +462,15 @@ class WidgetLeafTopBarService : AccessibilityService() {
                 position = currentSettings.topBarPosition,
                 itemWidthPx = itemWidthPx,
                 screenWidth = scanResult.screenWidth,
-                gapPx = gapPx
+                gapPx = gapPx,
+                cutoutRects = scanResult.cutoutRects,
+                density = density
             )
+
+            if (!placement.hasRoom) {
+                container.visibility = View.INVISIBLE
+                return
+            }
 
             container.visibility = View.VISIBLE
             if (params.gravity != placement.gravity ||
@@ -324,33 +485,48 @@ class WidgetLeafTopBarService : AccessibilityService() {
                 params.width = placement.width
                 params.height = placement.height
                 try {
-                    windowManager.updateViewLayout(container, params)
+                    entry.windowManager.updateViewLayout(container, params)
                 } catch (_: Throwable) {
                     // Ignored if view detached concurrently
                 }
             }
         } else {
-            val metrics = windowManager.currentWindowMetrics
+            // No top status bar window found via Accessibility: check live visible statusBars inset.
+            // On bottom-taskbar-only shells (e.g., DeX / ChromeOS shelf) or immersive fullscreen,
+            // visibleInsetTop == 0 -> HIDE the leaf (no floating fallback pill).
+            val metrics = entry.windowManager.currentWindowMetrics
             val screenW = metrics.bounds.width()
-            val insetTop = metrics.windowInsets
-                .getInsetsIgnoringVisibility(WindowInsets.Type.statusBars())
+            val visibleInsetTop = metrics.windowInsets
+                .getInsets(WindowInsets.Type.statusBars())
                 .top
-            val barH = if (insetTop > 0) insetTop else (36 * density).toInt()
+            if (visibleInsetTop <= 0 || screenW <= 0) {
+                container.visibility = View.INVISIBLE
+                return
+            }
+
+            val cutoutRects = metrics.windowInsets.displayCutout?.boundingRects.orEmpty()
+            val barRect = Rect(0, 0, screenW, visibleInsetTop)
             val fallbackFree = Rect(
                 (screenW * 0.12f).toInt(),
                 0,
                 (screenW * 0.82f).toInt(),
-                barH
+                visibleInsetTop
             )
             val placement = StatusBarSpaceScanner.computeCoexistingPlacement(
-                barBounds = Rect(0, 0, screenW, barH),
+                barBounds = barRect,
                 freeSpace = fallbackFree,
                 otherTopBarOverlays = emptyList(),
                 position = currentSettings.topBarPosition,
                 itemWidthPx = itemWidthPx,
                 screenWidth = screenW,
-                gapPx = gapPx
+                gapPx = gapPx,
+                cutoutRects = cutoutRects,
+                density = density
             )
+            if (!placement.hasRoom) {
+                container.visibility = View.INVISIBLE
+                return
+            }
             container.visibility = View.VISIBLE
             params.gravity = placement.gravity
             params.x = placement.x
@@ -358,27 +534,29 @@ class WidgetLeafTopBarService : AccessibilityService() {
             params.width = placement.width
             params.height = placement.height
             try {
-                windowManager.updateViewLayout(container, params)
+                entry.windowManager.updateViewLayout(container, params)
             } catch (_: Throwable) {
                 // Ignored
             }
         }
     }
 
-    private fun detachWindowIfNeeded() {
-        val view = stripContainer
-        if (isWindowAttached && view != null) {
+    private fun removeDisplayEntry(displayId: Int) {
+        val entry = displayWindows.remove(displayId) ?: return
+        if (entry.isWindowAttached) {
             try {
-                windowManager.removeViewImmediate(view)
+                entry.windowManager.removeViewImmediate(entry.stripContainer)
             } catch (_: Throwable) {
                 // Ignored
             }
+            entry.isWindowAttached = false
         }
-        stripContainer = null
-        hoverPillBg = null
-        iconView = null
-        layoutParams = null
-        isWindowAttached = false
+    }
+
+    private fun detachAllWindows() {
+        for (displayId in displayWindows.keys.toList()) {
+            removeDisplayEntry(displayId)
+        }
     }
 
     companion object {

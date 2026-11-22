@@ -551,6 +551,60 @@ class PlatformComponentsTest {
         assertThat(pendingIntent).isNotNull()
     }
 
+    @Test
+    fun activeDisplayLaunchHelperResolvesFocusedNonOverlayDisplayAndRoutesShortcutActivity() {
+        val topBarController = Robolectric.buildService(
+            io.devnullapps.widgetleaf.services.WidgetLeafTopBarService::class.java
+        )
+        val topBarService = topBarController.create().get()
+        topBarService.onServiceConnected()
+        Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        try {
+            val focusedOverlayDisplay0 = android.view.accessibility.AccessibilityWindowInfo.obtain().also { win ->
+                val s = Shadows.shadowOf(win)
+                s.setId(601)
+                s.setDisplayId(android.view.Display.DEFAULT_DISPLAY)
+                s.setType(android.view.accessibility.AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY)
+                s.setFocused(true)
+            }
+            val focusedAppDisplay4 = android.view.accessibility.AccessibilityWindowInfo.obtain().also { win ->
+                val s = Shadows.shadowOf(win)
+                s.setId(602)
+                s.setDisplayId(4)
+                s.setType(android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION)
+                s.setFocused(true)
+                s.setActive(true)
+            }
+            val shadowAcc = Shadows.shadowOf(topBarService as android.accessibilityservice.AccessibilityService)
+            shadowAcc.setWindowsOnDisplay(android.view.Display.DEFAULT_DISPLAY, listOf(focusedOverlayDisplay0))
+            shadowAcc.setWindowsOnDisplay(4, listOf(focusedAppDisplay4))
+
+            assertThat(ActiveDisplayLaunchHelper.getActiveDisplayId(topBarService)).isEqualTo(4)
+            assertThat(ActiveDisplayLaunchHelper.getActiveDisplayId(context)).isEqualTo(4)
+
+            val shadowApp = Shadows.shadowOf(context as android.app.Application)
+            shadowApp.clearNextStartedActivities()
+
+            val shortcutIntent = android.content.Intent(ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK).apply {
+                setClassName(context, ActiveDisplayLaunchHelper.SHORTCUT_ACTIVITY_CLASS_NAME)
+            }
+            val shortcutController = Robolectric.buildActivity(
+                io.devnullapps.widgetleaf.ui.ToggleDeckShortcutActivity::class.java,
+                shortcutIntent
+            ).create()
+
+            val started = shadowApp.nextStartedActivityForResult
+            assertThat(started).isNotNull()
+            assertThat(started.intent.component?.className).isEqualTo(ActiveDisplayLaunchHelper.DECK_ACTIVITY_CLASS_NAME)
+            assertThat(started.options?.getInt("android.activity.launchDisplayId", -1)).isEqualTo(4)
+            assertThat(shortcutController.get().isFinishing).isTrue()
+        } finally {
+            topBarController.destroy()
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        }
+    }
+
     // --- WidgetLeafApp Application Container Tests ---
 
     @Test

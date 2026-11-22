@@ -9,6 +9,7 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import android.view.Display
 import androidx.core.content.ContextCompat
 import io.devnullapps.widgetleaf.R
 import java.util.function.Consumer
@@ -23,6 +24,7 @@ class WidgetDeckTileService : TileService() {
 
     internal var lastLaunchedIntent: Intent? = null
     internal var lastLaunchedPendingIntent: PendingIntent? = null
+    internal var lastLaunchedDisplayId: Int = Display.DEFAULT_DISPLAY
 
     override fun onStartListening() {
         super.onStartListening()
@@ -38,23 +40,27 @@ class WidgetDeckTileService : TileService() {
     @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated")
     override fun onClick() {
         super.onClick()
+        val targetDisplayId = ActiveDisplayLaunchHelper.getActiveDisplayId(this)
         val intent = ActiveDisplayLaunchHelper.createLaunchIntent(
             context = this,
             action = ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
         )
+        val options = ActiveDisplayLaunchHelper.createLaunchOptions(this, targetDisplayId)
         val pendingIntent = ActiveDisplayLaunchHelper.createLaunchPendingIntent(
             context = this,
-            action = ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK
+            action = ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK,
+            displayId = targetDisplayId
         )
         lastLaunchedIntent = intent
         lastLaunchedPendingIntent = pendingIntent
+        lastLaunchedDisplayId = targetDisplayId
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             try {
                 startActivityAndCollapse(pendingIntent)
             } catch (_: Throwable) {
                 try {
-                    startActivity(intent)
+                    startActivity(intent, options.toBundle())
                 } catch (_: Throwable) {
                     // Ignored in test environment
                 }
@@ -64,7 +70,7 @@ class WidgetDeckTileService : TileService() {
                 @Suppress("DEPRECATION")
                 startActivityAndCollapse(intent)
             } catch (_: Throwable) {
-                startActivity(intent)
+                startActivity(intent, options.toBundle())
             }
         }
     }
