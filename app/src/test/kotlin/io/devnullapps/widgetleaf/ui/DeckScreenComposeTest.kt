@@ -467,7 +467,7 @@ class DeckScreenComposeTest {
         }
 
         composeTestRule.onNodeWithTag("overlay_settings_dialog").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("overlay_settings_version_badge").assertTextEquals("v0.0.4")
+        composeTestRule.onNodeWithTag("overlay_settings_version_badge").assertTextEquals("v0.0.5")
         composeTestRule.onNodeWithTag("current_hotkey_badge").assertTextEquals("Alt + W")
 
         // Toggle 1: openOnPageOne
@@ -492,6 +492,11 @@ class DeckScreenComposeTest {
         // Toggle 3: useDynamicColor
         composeTestRule.onNodeWithTag("setting_dynamic_color").performScrollTo().performClick()
         assertThat(currentSettings.useDynamicColor).isTrue()
+
+        // Settings footer displays versionName and versionCode
+        composeTestRule.onNodeWithTag("settings_version_footer")
+            .performScrollTo()
+            .assertTextEquals("WidgetLeaf v0.0.5 (7)")
     }
 
     @Test
