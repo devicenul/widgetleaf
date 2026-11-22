@@ -180,6 +180,7 @@ fun WidgetDeckOverlayScreen(
     onOpenContextMenu: (Pair<Float, Float>) -> Unit = {},
     onCloseContextMenu: () -> Unit = {},
     onReady: () -> Unit = {},
+    effectiveScrimAlpha: Float = uiState.settings.scrimAlpha,
     modifier: Modifier = Modifier,
     widgetContent: @Composable (PlacedWidget) -> Unit = { DefaultFramelessWidgetContent(it) }
 ) {
@@ -215,7 +216,6 @@ fun WidgetDeckOverlayScreen(
                 )
         ) {
             // LAYER 1: Optical Frost Scrim & 2% Procedural Noise Grain
-            val effectiveScrimAlpha = uiState.settings.scrimAlpha
             Box(
                 modifier = Modifier
                     .fillMaxSize()

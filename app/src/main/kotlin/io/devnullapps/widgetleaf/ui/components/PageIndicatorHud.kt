@@ -76,7 +76,7 @@ fun PageIndicatorHud(
             .testTag("bottom_pagination_hud")
             .height(52.dp),
         shape = RoundedCornerShape(26.dp),
-        backgroundColor = Color(0xD9161B22),
+        backgroundColor = WidgetLeafTheme.palette.hudSurface,
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
     ) {
         Row(

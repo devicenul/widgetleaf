@@ -58,7 +58,7 @@ class BootCompletedReceiverTest {
                 }
             },
             settingsProvider = {
-                OverlaySettings(launchOnStartup = true)
+                OverlaySettings(launchOnStartup = true, pinTopBarRightQsTile = true)
             },
             dispatcher = Dispatchers.Unconfined
         )

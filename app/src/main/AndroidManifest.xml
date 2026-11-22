@@ -63,6 +63,7 @@
 
         <service
             android:name=".services.WidgetDeckTileService"
+            android:enabled="false"
             android:exported="true"
             android:icon="@drawable/ic_qs_tile_leaf"
             android:label="@string/qs_tile_label"
@@ -108,7 +109,7 @@
         <receiver
             android:name=".services.BootCompletedReceiver"
             android:directBootAware="true"
-            android:enabled="true"
+            android:enabled="false"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

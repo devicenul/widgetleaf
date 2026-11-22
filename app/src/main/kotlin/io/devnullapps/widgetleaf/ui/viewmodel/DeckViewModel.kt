@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class DeckViewModel(
     private val repository: WidgetDeckRepository,
@@ -58,6 +60,8 @@ class DeckViewModel(
     private var rawPersistedWidgets: List<PlacedWidget> = emptyList()
     private var rawPersistedPages: List<DeckPage> = listOf(DeckPage(pageIndex = 0, customLabel = null))
     private var lastGoodProfile: DesktopGridProfile? = null
+    private val settingsUpdateMutex = Mutex()
+    private var pendingSettingsMutations: Int = 0
 
     internal fun getEffectiveGridProfile(currentProfile: DesktopGridProfile): DesktopGridProfile {
         val good = lastGoodProfile ?: return currentProfile
@@ -161,7 +165,11 @@ class DeckViewModel(
         viewModelScope.launch {
             repository.settingsFlow.collect { settings ->
                 _uiState.update { current ->
-                    current.copy(settings = settings)
+                    if (pendingSettingsMutations == 0) {
+                        current.copy(settings = settings, isSettingsLoaded = true)
+                    } else {
+                        current.copy(isSettingsLoaded = true)
+                    }
                 }
             }
         }
@@ -174,7 +182,12 @@ class DeckViewModel(
         viewModelScope.launch {
             reconcileOrphanWidgetsUseCase()
             val (snapshotPages, _) = repository.getSnapshot()
-            val settings = repository.settingsFlow.first()
+            val loadedSettings = repository.settingsFlow.first()
+            val effectiveSettings = if (pendingSettingsMutations > 0) {
+                _uiState.value.settings
+            } else {
+                loadedSettings
+            }
             val safePages = if (snapshotPages.isNotEmpty()) snapshotPages else _uiState.value.pages
             val profile = _uiState.value.gridProfile
             val currentWidgets = _uiState.value.widgets
@@ -185,10 +198,10 @@ class DeckViewModel(
             )
 
             val targetPage = targetPageOverride?.coerceIn(0, (displayedPages.size - 1).coerceAtLeast(0))
-                ?: if (settings.openOnPageOne) {
+                ?: if (effectiveSettings.openOnPageOne) {
                     0
                 } else {
-                    settings.lastViewedPageIndex.coerceIn(0, (displayedPages.size - 1).coerceAtLeast(0))
+                    effectiveSettings.lastViewedPageIndex.coerceIn(0, (displayedPages.size - 1).coerceAtLeast(0))
                 }
 
             val catalog = widgetHostGateway.getInstalledCatalog(profile)
@@ -223,7 +236,8 @@ class DeckViewModel(
                 current.copy(
                     widgets = refreshedWidgets,
                     pages = displayedPages,
-                    settings = settings,
+                    settings = if (pendingSettingsMutations > 0) current.settings else loadedSettings,
+                    isSettingsLoaded = true,
                     catalogItems = catalog,
                     activePageIndex = targetPage,
                     isReady = true,
@@ -248,9 +262,7 @@ class DeckViewModel(
         val currentIndex = _uiState.value.activePageIndex
         val newIndex = if (currentIndex <= 0) pages.lastIndex else currentIndex - 1
         _uiState.update { it.copy(activePageIndex = newIndex, snapPageTransitions = false) }
-        viewModelScope.launch {
-            repository.updateSettings { it.copy(lastViewedPageIndex = newIndex) }
-        }
+        updateSettings { it.copy(lastViewedPageIndex = newIndex) }
     }
 
     fun navigateNextPage() {
@@ -260,9 +272,7 @@ class DeckViewModel(
         val currentIndex = _uiState.value.activePageIndex
         val newIndex = if (currentIndex >= pages.lastIndex) 0 else currentIndex + 1
         _uiState.update { it.copy(activePageIndex = newIndex, snapPageTransitions = false) }
-        viewModelScope.launch {
-            repository.updateSettings { it.copy(lastViewedPageIndex = newIndex) }
-        }
+        updateSettings { it.copy(lastViewedPageIndex = newIndex) }
     }
 
     /**
@@ -276,9 +286,7 @@ class DeckViewModel(
         if (currentIndex > 0) {
             val newIndex = currentIndex - 1
             _uiState.update { it.copy(activePageIndex = newIndex, snapPageTransitions = false) }
-            viewModelScope.launch {
-                repository.updateSettings { it.copy(lastViewedPageIndex = newIndex) }
-            }
+            updateSettings { it.copy(lastViewedPageIndex = newIndex) }
             return true
         }
         return false
@@ -295,9 +303,7 @@ class DeckViewModel(
         if (currentIndex < pages.lastIndex) {
             val newIndex = currentIndex + 1
             _uiState.update { it.copy(activePageIndex = newIndex, snapPageTransitions = false) }
-            viewModelScope.launch {
-                repository.updateSettings { it.copy(lastViewedPageIndex = newIndex) }
-            }
+            updateSettings { it.copy(lastViewedPageIndex = newIndex) }
             return true
         }
         return false
@@ -308,9 +314,7 @@ class DeckViewModel(
         val pages = _uiState.value.pages
         if (index in pages.indices) {
             _uiState.update { it.copy(activePageIndex = index, snapPageTransitions = false) }
-            viewModelScope.launch {
-                repository.updateSettings { it.copy(lastViewedPageIndex = index) }
-            }
+            updateSettings { it.copy(lastViewedPageIndex = index) }
         }
     }
 
@@ -324,9 +328,7 @@ class DeckViewModel(
         val pages = _uiState.value.pages
         if (targetIndex in pages.indices) {
             _uiState.update { it.copy(activePageIndex = targetIndex, snapPageTransitions = false) }
-            viewModelScope.launch {
-                repository.updateSettings { it.copy(lastViewedPageIndex = targetIndex) }
-            }
+            updateSettings { it.copy(lastViewedPageIndex = targetIndex) }
         }
     }
 
@@ -1462,8 +1464,24 @@ class DeckViewModel(
     }
 
     fun updateSettings(transform: (OverlaySettings) -> OverlaySettings) {
+        pendingSettingsMutations++
+        _uiState.update { current ->
+            current.copy(settings = transform(current.settings))
+        }
         viewModelScope.launch {
-            repository.updateSettings(transform)
+            try {
+                settingsUpdateMutex.withLock {
+                    repository.updateSettings(transform)
+                }
+            } finally {
+                pendingSettingsMutations = (pendingSettingsMutations - 1).coerceAtLeast(0)
+                if (pendingSettingsMutations == 0) {
+                    val latest = repository.settingsFlow.first()
+                    _uiState.update { current ->
+                        current.copy(settings = latest, isSettingsLoaded = true)
+                    }
+                }
+            }
         }
     }
 

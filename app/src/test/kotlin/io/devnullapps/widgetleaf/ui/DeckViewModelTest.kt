@@ -1719,6 +1719,29 @@ class DeckViewModelTest {
         assertFalse(rawDrop.bounds.intersects(rawW2.bounds))
     }
 
+    @Test
+    fun updateSettings_updatesUiStateOptimisticallyAndSetsIsSettingsLoaded() = runTest {
+        assertTrue(viewModel.uiState.value.isSettingsLoaded)
+        assertFalse(viewModel.uiState.value.settings.launchOnStartup)
+        assertFalse(viewModel.uiState.value.settings.pinTopBarRightQsTile)
+        assertFalse(viewModel.uiState.value.settings.useDynamicColor)
+
+        viewModel.updateSettings {
+            it.copy(
+                launchOnStartup = true,
+                pinTopBarRightQsTile = true,
+                useDynamicColor = true
+            )
+        }
+
+        assertTrue(viewModel.uiState.value.settings.launchOnStartup)
+        assertTrue(viewModel.uiState.value.settings.pinTopBarRightQsTile)
+        assertTrue(viewModel.uiState.value.settings.useDynamicColor)
+        assertTrue(fakeRepository.settings.launchOnStartup)
+        assertTrue(fakeRepository.settings.pinTopBarRightQsTile)
+        assertTrue(fakeRepository.settings.useDynamicColor)
+    }
+
     private fun createCatalogItem(pkg: String, label: String, spanX: Int, spanY: Int) = WidgetCatalogItem(
         providerPackage = pkg,
         providerClass = "$pkg.Widget",

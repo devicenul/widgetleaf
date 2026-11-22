@@ -221,7 +221,7 @@ fun WidgetEditResizeFrame(
         GlassHudSurface(
             modifier = Modifier.align(Alignment.Center),
             shape = RoundedCornerShape(22.dp),
-            backgroundColor = Color(0xF2161B22),
+            backgroundColor = WidgetLeafTheme.palette.actionPillSurface,
             borderColor = WidgetLeafTheme.palette.leafPrimary.copy(alpha = 0.7f),
             borderWidth = 1.dp,
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)

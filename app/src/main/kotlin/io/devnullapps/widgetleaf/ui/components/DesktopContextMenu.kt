@@ -104,7 +104,7 @@ fun DesktopContextMenu(
                 .width(220.dp)
                 .testTag("desktop_context_menu"),
             shape = RoundedCornerShape(16.dp),
-            backgroundColor = Color(0xF0161B22),
+            backgroundColor = WidgetLeafTheme.palette.menuSurface,
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)
         ) {
             Column(

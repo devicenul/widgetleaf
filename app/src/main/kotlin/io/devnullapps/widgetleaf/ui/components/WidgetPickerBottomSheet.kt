@@ -89,9 +89,12 @@ fun WidgetPickerBottomSheet(
                 .fillMaxWidth()
                 .heightIn(min = 340.dp, max = 580.dp)
                 .padding(horizontal = 24.dp, vertical = 20.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures { /* Absorb inside taps without merging semantics */ }
+                }
                 .testTag("widget_picker_sheet"),
             shape = RoundedCornerShape(24.dp),
-            backgroundColor = Color(0xEB161B22),
+            backgroundColor = WidgetLeafTheme.palette.panelSurface,
             contentPadding = PaddingValues(24.dp)
         ) {
             Column(

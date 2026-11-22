@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +45,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
@@ -115,9 +117,12 @@ fun OverlaySettingsDialog(
                 .fillMaxWidth(0.92f)
                 .heightIn(max = 700.dp)
                 .padding(24.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures { /* Absorb inside taps without merging semantics */ }
+                }
                 .testTag("overlay_settings_dialog"),
             shape = RoundedCornerShape(22.dp),
-            backgroundColor = Color(0xEB161B22),
+            backgroundColor = WidgetLeafTheme.palette.panelSurface,
             contentPadding = PaddingValues(24.dp)
         ) {
             Column(
@@ -238,7 +243,7 @@ fun OverlaySettingsDialog(
                                 if (!isRecordingHotkey) return@onKeyEvent false
                                 val native = keyEvent.nativeKeyEvent
                                 if (native.action != KeyEvent.ACTION_DOWN) return@onKeyEvent true
-                                if (native.keyCode == KeyEvent.KEYCODE_ESCAPE) {
+                                if (native.keyCode == KeyEvent.KEYCODE_ESCAPE || native.keyCode == KeyEvent.KEYCODE_BACK) {
                                     isRecordingHotkey = false
                                     return@onKeyEvent true
                                 }
@@ -695,6 +700,7 @@ private fun SettingToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween

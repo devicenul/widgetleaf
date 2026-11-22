@@ -1,8 +1,10 @@
 package io.devnullapps.widgetleaf.services
 
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.service.quicksettings.TileService
 import io.devnullapps.widgetleaf.domain.model.OverlaySettings
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -62,6 +64,16 @@ class BootCompletedReceiver(
 
                 statusBarTriggerManager.syncStatusBarTrigger(true)
                 taskbarPlacementManager.syncRunningTaskbarPresence(context)
+                if (settings.pinTopBarRightQsTile) {
+                    try {
+                        TileService.requestListeningState(
+                            context,
+                            ComponentName(context, WidgetDeckTileService::class.java)
+                        )
+                    } catch (_: Throwable) {
+                        // Ignored in headless / unsupported test environments
+                    }
+                }
             } finally {
                 pendingResult?.finish()
             }

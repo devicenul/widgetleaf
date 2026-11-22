@@ -74,7 +74,8 @@
 │       │   ├── services/            # WidgetLeafTopBarService (Accessibility top-bar leaf + hotkey),
 │       │   │                        # StatusBarSpaceScanner (BentoBar coexistence),
 │       │   │                        # TaskbarPlacementManager, StatusBarTriggerManager,
-│       │   │                        # BootCompletedReceiver, WidgetDeckTileService
+│       │   │                        # OverlaySettingsSideEffectController, BootCompletedReceiver,
+│       │   │                        # WidgetDeckTileService
 │       │   └── ui/
 │       │       ├── WidgetDeckActivity.kt        # Translucent overlay Activity & AppWidget bind flow
 │       │       ├── viewmodel/                   # DeckViewModel & DeckUiState

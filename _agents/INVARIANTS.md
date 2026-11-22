@@ -188,6 +188,23 @@
   3. **Programmatic Snap vs. Interactive Animation:** `DeckUiState` includes `snapPageTransitions: Boolean = true`. `DeckPageTransitionSpec.createTransition` yields `EnterTransition.None togetherWith ExitTransition.None` whenever `snapPageTransitions == true` or `targetState == initialState`. Programmatic page restoration snaps instantly with zero duration.
   4. **Post-Ready Animation Enablement:** Once the initial ready state is composed, `LaunchedEffect(uiState.isReady)` calls `onReady` (`viewModel.enablePageAnimations()`), setting `snapPageTransitions = false`. All subsequent user-initiated navigations (touch/trackpad swipes, pagination HUD pill clicks, arrow keys, number keys, and in-drag edge dwell) animate with smooth spring physics (`PAGE_FLIP_SPRING_DAMPING`, `PAGE_FLIP_SPRING_STIFFNESS`).
 
+---
+
+## 7. Settings Persistence, Reactivity & Side-Effect Application
+
+### INV-22: Immediate Settings Persistence, Optimistic State Synchronization & Side-Effect Application
+- **Why:** Previously, `OverlaySettings` mutations waited on async DataStore disk I/O before updating UI state, `onOverlayShown()` could overwrite recent setting changes with a stale snapshot captured prior to `getInstalledCatalog()`, `WidgetDeckActivity` lacked component enable/disable and `TileService.requestListeningState` side effects for `launchOnStartup` and `pinTopBarRightQsTile` (and re-triggered `requestPinQsTile` on subsequent opens due to an uninitialized `false` baseline before DataStore emitted), Material You dynamic theming left `leafBright` and dialog/HUD surfaces hardcoded, and `WidgetDeckActivity` passed blur-fallback `effectiveScrim` into `OverlaySettingsDialog`.
+- **Rule:**
+  1. **Optimistic + Serialized Settings Updates (`DeckViewModel`):** `DeckUiState` exposes `isSettingsLoaded: Boolean`. `DeckViewModel.updateSettings` updates `_uiState.value.settings` optimistically on the main thread, increments `pendingSettingsMutations`, and serializes `repository.updateSettings` under `settingsUpdateMutex`. While `pendingSettingsMutations > 0`, `settingsFlow` emissions and `onOverlayShown` must NOT overwrite `current.settings` with stale snapshots.
+  2. **Reactive Side Effects (`OverlaySettingsSideEffectController`):** `WidgetDeckActivity` waits until `uiState.isSettingsLoaded` is true and applies side effects reactively whenever `uiState.settings` loads or changes:
+     - `BootCompletedReceiver` component enabled state (`ENABLED` vs `DISABLED`) via `PackageManager.setComponentEnabledSetting(..., PackageManager.DONT_KILL_APP)`.
+     - `WidgetDeckTileService` component enabled state via `PackageManager.setComponentEnabledSetting(..., PackageManager.DONT_KILL_APP)` plus `TileService.requestListeningState` when enabled.
+     - `WidgetDeckTileService.requestPinQsTile` is invoked ONLY on an active `false -> true` transition after `lastAppliedSettings != null` (protected by `isAwaitingInternalSystemPrompt` so the system pin sheet never dismisses the overlay).
+     - `blurController.updateBlurRadius` and `gridProfileResolver.resolve` update immediately.
+  3. **Live Material You Dynamic Theme (`WidgetLeafTheme`):** `WidgetLeafTheme(useDynamicColor)` derives `leafPrimary`, `leafBright`, `leafGlow`, `glassSurface`, `glassSurfaceHover`, `glassBorder`, `scrimDark`, `panelSurface`, `hudSurface`, `menuSurface`, `actionPillSurface`, text tokens, and `MaterialTheme.colorScheme` directly from `dynamicDarkColorScheme(context)` on API 31+ so toggling Material You takes effect immediately across the entire overlay without reopening.
+  4. **Configured vs. Effective Scrim Separation & Key Routing:** `WidgetDeckOverlayScreen` takes `effectiveScrimAlpha` separately from `uiState.settings.scrimAlpha` so `OverlaySettingsDialog` always displays and edits the configured scrim opacity. `OverlaySettingsDialog` and `WidgetPickerBottomSheet` absorb inside whitespace taps via `pointerInput(Unit) { detectTapGestures {} }` (without merging semantics descendants), and `WidgetDeckActivity.dispatchKeyEvent` delegates to `super.dispatchKeyEvent` first when dialogs/search/inline editors are active so hotkey recording and text input work reliably.
+
+
 
 
 

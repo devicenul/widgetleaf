@@ -20,6 +20,10 @@ data class WidgetLeafPalette(
     val glassBorder: Color = GlassBorder,
     val glassSpecular: Color = GlassSpecular,
     val scrimDark: Color = ScrimDark,
+    val panelSurface: Color = PanelSurface,
+    val hudSurface: Color = HudSurface,
+    val menuSurface: Color = MenuSurface,
+    val actionPillSurface: Color = ActionPillSurface,
     val textPrimary: Color = TextPrimary,
     val textSecondary: Color = TextSecondary,
     val textTertiary: Color = TextTertiary
@@ -42,26 +46,31 @@ fun WidgetLeafTheme(
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
-    val palette = if (useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        val dynamicColors = dynamicDarkColorScheme(context)
+    val isDynamic = useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val dynamicColors = if (isDynamic) dynamicDarkColorScheme(context) else null
+    val palette = if (dynamicColors != null) {
         WidgetLeafPalette(
             leafPrimary = dynamicColors.primary,
-            leafBright = LeafBright,
-            leafGlow = dynamicColors.primary.copy(alpha = 0.14f),
-            glassSurface = dynamicColors.surfaceContainerHighest.copy(alpha = 0.40f),
-            glassSurfaceHover = GlassSurfaceHover,
-            glassBorder = GlassBorder,
+            leafBright = dynamicColors.onPrimaryContainer,
+            leafGlow = dynamicColors.primary.copy(alpha = 0.18f),
+            glassSurface = dynamicColors.surfaceContainerHigh.copy(alpha = 0.72f),
+            glassSurfaceHover = dynamicColors.surfaceContainerHighest.copy(alpha = 0.48f),
+            glassBorder = dynamicColors.outlineVariant.copy(alpha = 0.55f),
             glassSpecular = GlassSpecular,
-            scrimDark = dynamicColors.scrim.copy(alpha = 0.70f),
-            textPrimary = TextPrimary,
-            textSecondary = TextSecondary,
-            textTertiary = TextTertiary
+            scrimDark = dynamicColors.surfaceContainerLowest.copy(alpha = 0.72f),
+            panelSurface = dynamicColors.surfaceContainer.copy(alpha = 0.94f),
+            hudSurface = dynamicColors.surfaceContainerHigh.copy(alpha = 0.88f),
+            menuSurface = dynamicColors.surfaceContainerHigh.copy(alpha = 0.94f),
+            actionPillSurface = dynamicColors.surfaceContainerHigh.copy(alpha = 0.95f),
+            textPrimary = dynamicColors.onSurface,
+            textSecondary = dynamicColors.onSurfaceVariant,
+            textTertiary = dynamicColors.outline
         )
     } else {
         WidgetLeafPalette()
     }
 
-    val darkScheme = darkColorScheme(
+    val darkScheme = dynamicColors ?: darkColorScheme(
         primary = palette.leafPrimary,
         secondary = palette.leafBright,
         background = ObsidianBase,

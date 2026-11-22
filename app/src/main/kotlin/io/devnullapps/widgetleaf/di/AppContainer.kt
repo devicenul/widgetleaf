@@ -18,13 +18,15 @@ import io.devnullapps.widgetleaf.platform.AndroidWindowBlurController
 import io.devnullapps.widgetleaf.platform.BlurController
 import io.devnullapps.widgetleaf.platform.DesktopGridProfileResolver
 import io.devnullapps.widgetleaf.platform.WidgetHostGateway
+import io.devnullapps.widgetleaf.services.OverlaySettingsSideEffectController
 import io.devnullapps.widgetleaf.services.StatusBarTriggerManager
 import io.devnullapps.widgetleaf.services.TaskbarPlacementManager
 import io.devnullapps.widgetleaf.ui.hostview.WidgetDeckHost
 
 open class AppContainer(
     context: Context,
-    private val useInMemoryDb: Boolean = false
+    private val useInMemoryDb: Boolean = false,
+    private val preferencesDataStoreOverride: PreferencesDataStore? = null
 ) {
 
     private val appContext = context.applicationContext
@@ -44,7 +46,7 @@ open class AppContainer(
     }
 
     val preferencesDataStore: PreferencesDataStore by lazy {
-        PreferencesDataStore.createDataStore(appContext)
+        preferencesDataStoreOverride ?: PreferencesDataStore.createDataStore(appContext)
     }
 
     val repository: WidgetDeckRepository by lazy {
@@ -87,6 +89,14 @@ open class AppContainer(
 
     val taskbarPlacementManager: TaskbarPlacementManager by lazy {
         TaskbarPlacementManager()
+    }
+
+    open val settingsSideEffectController: OverlaySettingsSideEffectController by lazy {
+        OverlaySettingsSideEffectController(
+            context = appContext,
+            statusBarTriggerManager = statusBarTriggerManager,
+            taskbarPlacementManager = taskbarPlacementManager
+        )
     }
 
     val cascadeDisplacementResolver: CascadeDisplacementResolver by lazy {

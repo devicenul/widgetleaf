@@ -1432,6 +1432,67 @@ class DeckScreenComposeTest {
     }
 
     @Test
+    fun togglingDynamicColor_immediatelyRecomposesThemeWithDynamicColorScheme() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val expectedDynamic = androidx.compose.material3.dynamicDarkColorScheme(context)
+        var observedPrimary: androidx.compose.ui.graphics.Color? = null
+        var observedPanelSurface: androidx.compose.ui.graphics.Color? = null
+        var observedSchemePrimary: androidx.compose.ui.graphics.Color? = null
+
+        composeTestRule.setContent {
+            var s by remember { mutableStateOf(OverlaySettings(useDynamicColor = false)) }
+            WidgetDeckOverlayScreen(
+                uiState = DeckUiState(
+                    isReady = true,
+                    isOverlaySettingsOpen = true,
+                    settings = s,
+                    widgets = listOf(
+                        PlacedWidget(
+                            appWidgetId = 55,
+                            providerPackage = "io.test",
+                            providerClass = "W",
+                            pageIndex = 0,
+                            cellX = 0,
+                            cellY = 0,
+                            spanX = 2,
+                            spanY = 2
+                        )
+                    )
+                ),
+                onDismissOverlay = {},
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = { transform -> s = transform(s) },
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                widgetContent = {
+                    observedPrimary = io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme.palette.leafPrimary
+                    observedPanelSurface = io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme.palette.panelSurface
+                    observedSchemePrimary = androidx.compose.material3.MaterialTheme.colorScheme.primary
+                }
+            )
+        }
+
+        composeTestRule.waitForIdle()
+        assertThat(observedPrimary).isEqualTo(io.devnullapps.widgetleaf.ui.theme.LeafPrimary)
+        assertThat(observedPanelSurface).isEqualTo(io.devnullapps.widgetleaf.ui.theme.PanelSurface)
+
+        composeTestRule.onNodeWithTag("setting_dynamic_color").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        assertThat(observedPrimary).isEqualTo(expectedDynamic.primary)
+        assertThat(observedSchemePrimary).isEqualTo(expectedDynamic.primary)
+        assertThat(observedPanelSurface).isEqualTo(expectedDynamic.surfaceContainer.copy(alpha = 0.94f))
+    }
+
+    @Test
     fun widgetAndroidView_layoutSizeEqualsReportedResponsiveSize() {
         val widget = PlacedWidget(
             appWidgetId = 42,

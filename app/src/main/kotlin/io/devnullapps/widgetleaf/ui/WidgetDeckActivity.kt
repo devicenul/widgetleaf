@@ -67,7 +67,8 @@ class WidgetDeckActivity : ComponentActivity() {
         private set
 
     private var wasAlreadyResumed: Boolean = false
-    private var lastPinTopBarRightState: Boolean = false
+    private var lastAppliedSettings: OverlaySettings? = null
+    private var isAwaitingInternalSystemPrompt: Boolean = false
     private var hasRequestedNotificationPermission: Boolean = false
     private var lastSecondaryClickUptimeMs: Long = -10_000L
     private var lastWidgetMutationOrFlowUptimeMs: Long = -10_000L
@@ -185,7 +186,7 @@ class WidgetDeckActivity : ComponentActivity() {
                 }
             }
 
-            LaunchedEffect(uiState.settings) {
+            LaunchedEffect(uiState.isSettingsLoaded, uiState.settings) {
                 val settings = uiState.settings
                 container.blurController.updateBlurRadius(window, settings.blurRadiusDp)
                 if (!hasRequestedNotificationPermission &&
@@ -199,8 +200,6 @@ class WidgetDeckActivity : ComponentActivity() {
                         // Ignored in headless test environments
                     }
                 }
-                container.statusBarTriggerManager.syncStatusBarTrigger(true)
-                container.taskbarPlacementManager.syncRunningTaskbarPresence(this@WidgetDeckActivity)
 
                 val updatedProfile = container.gridProfileResolver.resolve(
                     context = this@WidgetDeckActivity,
@@ -208,10 +207,25 @@ class WidgetDeckActivity : ComponentActivity() {
                 )
                 viewModel.updateGridProfile(updatedProfile)
 
-                if (settings.pinTopBarRightQsTile && !lastPinTopBarRightState) {
-                    WidgetDeckTileService.requestPinQsTile(this@WidgetDeckActivity)
+                if (uiState.isSettingsLoaded) {
+                    val prev = lastAppliedSettings
+                    container.settingsSideEffectController.applySettings(
+                        settings = settings,
+                        previousSettings = prev,
+                        promptContext = this@WidgetDeckActivity,
+                        onPinPromptStarted = {
+                            isAwaitingInternalSystemPrompt = true
+                            lastWidgetMutationOrFlowUptimeMs = SystemClock.uptimeMillis()
+                        },
+                        onPinPromptFinished = {
+                            isAwaitingInternalSystemPrompt = false
+                        }
+                    )
+                    lastAppliedSettings = settings
+                } else {
+                    container.statusBarTriggerManager.syncStatusBarTrigger(true)
+                    container.taskbarPlacementManager.syncRunningTaskbarPresence(this@WidgetDeckActivity)
                 }
-                lastPinTopBarRightState = settings.pinTopBarRightQsTile
             }
 
             LaunchedEffect(uiState.pendingWidgetAction) {
@@ -248,9 +262,6 @@ class WidgetDeckActivity : ComponentActivity() {
                 configuredAlpha = uiState.settings.scrimAlpha,
                 isBlurActive = isBlurActive
             )
-            val displayState = uiState.copy(
-                settings = uiState.settings.copy(scrimAlpha = effectiveScrim)
-            )
 
             val triggerExitAnimation: () -> Unit = {
                 if (!isExiting) {
@@ -278,7 +289,8 @@ class WidgetDeckActivity : ComponentActivity() {
             }
 
             WidgetDeckOverlayScreen(
-                uiState = displayState,
+                uiState = uiState,
+                effectiveScrimAlpha = effectiveScrim,
                 onDismissOverlay = triggerExitAnimation,
                 onSelectPage = viewModel::selectPage,
                 onPreviousPage = viewModel::navigatePreviousPage,
@@ -556,6 +568,7 @@ class WidgetDeckActivity : ComponentActivity() {
         activeInstance = this
         isDeckVisible = true
         wasAlreadyResumed = true
+        isAwaitingInternalSystemPrompt = false
         if (::viewModel.isInitialized && viewModel.uiState.value.pendingWidgetAction == null) {
             viewModel.markLaunchingInternalFlow(false)
         }
@@ -590,7 +603,10 @@ class WidgetDeckActivity : ComponentActivity() {
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         val now = SystemClock.uptimeMillis()
-        if (now - lastSecondaryClickUptimeMs < 600L || now - lastWidgetMutationOrFlowUptimeMs < 1500L) {
+        if (now - lastSecondaryClickUptimeMs < 600L ||
+            now - lastWidgetMutationOrFlowUptimeMs < 1500L ||
+            isAwaitingInternalSystemPrompt
+        ) {
             return
         }
         if (::viewModel.isInitialized && viewModel.shouldAutoDismissOnUserLeave()) {
@@ -772,6 +788,12 @@ class WidgetDeckActivity : ComponentActivity() {
             val state = viewModel.uiState.value
             val isTypingText = state.editingPageLabelIndex != null || state.isWidgetPickerOpen
 
+            if (isTypingText || state.isOverlaySettingsOpen) {
+                if (super.dispatchKeyEvent(event)) {
+                    return true
+                }
+            }
+
             if (event.keyCode == KeyEvent.KEYCODE_ESCAPE) {
                 val consumed = viewModel.handleEscapeKey()
                 if (!consumed) {
@@ -780,21 +802,21 @@ class WidgetDeckActivity : ComponentActivity() {
                 return true
             }
 
-            if (!isTypingText && !state.isOverlaySettingsOpen && state.settings.matchesKeyEvent(event)) {
-                val now = SystemClock.uptimeMillis()
-                if (now - lastHotkeyToggleUptimeMs >= 350L) {
-                    lastHotkeyToggleUptimeMs = now
-                    finishWithoutAnimation()
-                }
-                return true
-            }
-
-            // Key repeats or releases of the hotkey must never fall through to dismiss on other keys
-            if (event.keyCode == state.settings.hotkeyKeyCode) {
-                return true
-            }
-
             if (!isTypingText && !state.isOverlaySettingsOpen) {
+                if (state.settings.matchesKeyEvent(event)) {
+                    val now = SystemClock.uptimeMillis()
+                    if (now - lastHotkeyToggleUptimeMs >= 350L) {
+                        lastHotkeyToggleUptimeMs = now
+                        finishWithoutAnimation()
+                    }
+                    return true
+                }
+
+                // Key repeats or releases of the hotkey must never fall through to dismiss on other keys
+                if (event.keyCode == state.settings.hotkeyKeyCode) {
+                    return true
+                }
+
                 when (event.keyCode) {
                     KeyEvent.KEYCODE_DPAD_LEFT,
                     KeyEvent.KEYCODE_PAGE_UP -> {
