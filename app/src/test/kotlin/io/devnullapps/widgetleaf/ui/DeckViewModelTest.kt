@@ -1865,6 +1865,129 @@ class DeckViewModelTest {
         assertEquals(resizePreview.sortedBy { it.appWidgetId }, viewModel.uiState.value.widgets.sortedBy { it.appWidgetId })
     }
 
+    @Test
+    fun reflowWidgetsToFitGrid_page0Overflow_neverDisplacesInBoundsPage1WidgetsAndNeverPersists() = runTest(testDispatcher) {
+        // 8x6 raw layout across 2 pages:
+        // Page 0: w1 fills (0,0,4x4), w2 overflows at (5,0,2x2) when shrunk to 4x4
+        // Page 1: w3 at (0,0,2x2) and w4 at (2,0,2x2) — both strictly in-bounds in 4x4!
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 4, spanY = 4)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 5, cellY = 0, spanX = 2, spanY = 2)
+        val w3 = createWidget(id = 3, pageIndex = 1, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w4 = createWidget(id = 4, pageIndex = 1, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setPages(listOf(DeckPage(0), DeckPage(1)))
+        fakeRepository.setWidgets(listOf(w1, w2, w3, w4))
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 8, rows = 6))
+
+        // Shrink to 4x4: page 0 is completely filled by w1 (4x4), so w2 overflows to page 1.
+        // Page 1's in-bounds w3 and w4 MUST stay at (0,0) and (2,0) — never displaced by w2!
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 4, rows = 4))
+
+        val disp = viewModel.uiState.value.widgets
+        val dispW1 = disp.first { it.appWidgetId == 1 }
+        val dispW2 = disp.first { it.appWidgetId == 2 }
+        val dispW3 = disp.first { it.appWidgetId == 3 }
+        val dispW4 = disp.first { it.appWidgetId == 4 }
+
+        assertEquals(0, dispW1.pageIndex)
+        assertEquals(0, dispW1.cellX)
+        assertEquals(0, dispW1.cellY)
+
+        assertEquals(1, dispW3.pageIndex)
+        assertEquals(0, dispW3.cellX)
+        assertEquals(0, dispW3.cellY)
+
+        assertEquals(1, dispW4.pageIndex)
+        assertEquals(2, dispW4.cellX)
+        assertEquals(0, dispW4.cellY)
+
+        // w2 landed in Page 1's free space (0, 2) without overlapping w3 or w4
+        assertEquals(1, dispW2.pageIndex)
+        assertEquals(0, dispW2.cellX)
+        assertEquals(2, dispW2.cellY)
+        assertFalse(dispW2.bounds.intersects(dispW3.bounds))
+        assertFalse(dispW2.bounds.intersects(dispW4.bounds))
+
+        // Display-only: persisted Room state was NEVER modified
+        assertEquals(listOf(w1, w2, w3, w4), fakeRepository.widgets)
+
+        // Now fill Page 1 completely with 4 in-bounds 2x2 widgets and shrink again:
+        // w2 from Page 0 must spill to Page 2, leaving ALL 4 Page-1 widgets at their exact cells.
+        val w5 = createWidget(id = 5, pageIndex = 1, cellX = 0, cellY = 2, spanX = 2, spanY = 2)
+        val w6 = createWidget(id = 6, pageIndex = 1, cellX = 2, cellY = 2, spanX = 2, spanY = 2)
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 8, rows = 6))
+        fakeRepository.setWidgets(listOf(w1, w2, w3, w4, w5, w6))
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 4, rows = 4))
+
+        val fullDisp = viewModel.uiState.value.widgets
+        assertEquals(1, fullDisp.first { it.appWidgetId == 3 }.pageIndex)
+        assertEquals(Pair(0, 0), fullDisp.first { it.appWidgetId == 3 }.let { it.cellX to it.cellY })
+        assertEquals(1, fullDisp.first { it.appWidgetId == 4 }.pageIndex)
+        assertEquals(Pair(2, 0), fullDisp.first { it.appWidgetId == 4 }.let { it.cellX to it.cellY })
+        assertEquals(1, fullDisp.first { it.appWidgetId == 5 }.pageIndex)
+        assertEquals(Pair(0, 2), fullDisp.first { it.appWidgetId == 5 }.let { it.cellX to it.cellY })
+        assertEquals(1, fullDisp.first { it.appWidgetId == 6 }.pageIndex)
+        assertEquals(Pair(2, 2), fullDisp.first { it.appWidgetId == 6 }.let { it.cellX to it.cellY })
+        assertEquals(2, fullDisp.first { it.appWidgetId == 2 }.pageIndex)
+        assertEquals(Pair(0, 0), fullDisp.first { it.appWidgetId == 2 }.let { it.cellX to it.cellY })
+        assertEquals(listOf(w1, w2, w3, w4, w5, w6), fakeRepository.widgets)
+    }
+
+    @Test
+    fun normalDisplay1280x720WithBars_noReflowOccursForV004WidgetsAndNeverPersists() = runTest(testDispatcher) {
+        val profile = io.devnullapps.widgetleaf.platform.DesktopGridProfileResolver.resolve(
+            screenWidthDp = 1280f,
+            screenHeightDp = 720f,
+            useCenteredBentoCanvas = false,
+            topInsetDp = 32f,
+            bottomInsetDp = 48f
+        )
+        assertEquals(7, profile.columns)
+        assertEquals(5, profile.rows)
+
+        val edgeRightWidget = createWidget(id = 10, pageIndex = 0, cellX = 5, cellY = 0, spanX = 2, spanY = 2)
+        val bottomEdgeWidget = createWidget(id = 11, pageIndex = 0, cellX = 0, cellY = 3, spanX = 3, spanY = 2)
+        val page1Widget = createWidget(id = 12, pageIndex = 1, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        fakeGateway.allocatedIds = listOf(10, 11, 12)
+        fakeGateway.installedProviders.add(edgeRightWidget.providerPackage to edgeRightWidget.providerClass)
+        fakeGateway.installedProviders.add(bottomEdgeWidget.providerPackage to bottomEdgeWidget.providerClass)
+        fakeGateway.installedProviders.add(page1Widget.providerPackage to page1Widget.providerClass)
+        fakeRepository.setPages(listOf(DeckPage(0), DeckPage(1)))
+        fakeRepository.setWidgets(listOf(edgeRightWidget, bottomEdgeWidget, page1Widget))
+
+        viewModel.updateGridProfile(profile)
+        viewModel.onOverlayShown()
+
+        val displayed = viewModel.uiState.value.widgets
+        assertEquals(setOf(edgeRightWidget, bottomEdgeWidget, page1Widget), displayed.toSet())
+        assertEquals(setOf(edgeRightWidget, bottomEdgeWidget, page1Widget), fakeRepository.widgets.toSet())
+    }
+
+    @Test
+    fun onOverlayShown_nullLastGoodGridSizeOnUpgrade_initializesFromMaxProfileAndRawBoundsWithoutMutatingRawState() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 21, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 22, pageIndex = 0, cellX = 5, cellY = 3, spanX = 2, spanY = 2) // raw bounding size = 7x5
+        fakeGateway.allocatedIds = listOf(21, 22)
+        fakeGateway.installedProviders.add(w1.providerPackage to w1.providerClass)
+        fakeGateway.installedProviders.add(w2.providerPackage to w2.providerClass)
+        fakeRepository.setPages(listOf(DeckPage(0)))
+        fakeRepository.setWidgets(listOf(w1, w2))
+        assertNull(fakeRepository.lastGoodGridSize)
+
+        // Upgrade cold start in a smaller 4x4 window while lastGoodGridSize is null
+        val upgradeVm = DeckViewModel(fakeRepository, fakeGateway)
+        upgradeVm.updateGridProfile(DesktopGridProfile(columns = 4, rows = 4))
+        upgradeVm.onOverlayShown()
+
+        // lastGoodGridSize initialized from max(current profile 4x4, raw bounding size 7x5) = (7, 5)
+        assertEquals(Pair(7, 5), fakeRepository.lastGoodGridSize)
+        // Raw persisted widget placements remain completely untouched
+        assertEquals(setOf(w1, w2), fakeRepository.widgets.toSet())
+        // Display is safely reflowed into 4x4
+        val dispW2 = upgradeVm.uiState.value.widgets.first { it.appWidgetId == 22 }
+        assertTrue(dispW2.cellX + dispW2.spanX <= 4)
+        assertTrue(dispW2.cellY + dispW2.spanY <= 4)
+    }
+
     private fun createCatalogItem(pkg: String, label: String, spanX: Int, spanY: Int) = WidgetCatalogItem(
         providerPackage = pkg,
         providerClass = "$pkg.Widget",

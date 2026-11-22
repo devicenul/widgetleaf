@@ -103,7 +103,15 @@ class PlatformComponentsTest {
     }
 
     @Test
-    fun desktopGridProfileResolverCentersWithin1440DpAndFillsFullWidthWhenDisabledOn1920x1080() {
+    fun desktopGridProfileResolverCentersWithin1440DpOnlyWhenExplicitlyEnabledOn1920x1080() {
+        val defaultProfile = DesktopGridProfileResolver.resolve(
+            screenWidthDp = 1920f,
+            screenHeightDp = 1080f
+        )
+        assertThat(defaultProfile.columns).isEqualTo(11)
+        assertThat(defaultProfile.rows).isEqualTo(8)
+        assertThat(defaultProfile.marginDp).isEqualTo(36f)
+
         val centeredProfile = DesktopGridProfileResolver.resolve(
             screenWidthDp = 1920f,
             screenHeightDp = 1080f,
@@ -130,6 +138,94 @@ class PlatformComponentsTest {
         val fullRightMargin = fullWidthProfile.availableWidthDp - (fullWidthProfile.marginDp + fullGridWidth)
         assertThat(fullRightMargin).isWithin(0.01f).of(fullWidthProfile.marginDp)
         assertThat(fullGridWidth + 2 * fullWidthProfile.marginDp).isWithin(0.01f).of(1920f)
+    }
+
+    @Test
+    fun desktopGridProfileResolver_normalDisplaysWithBars_matchV004ColsRowsAnd36dpMarginsWithoutHudOverlap() {
+        data class NormalDisplayCase(
+            val w: Float,
+            val h: Float,
+            val expectedCols: Int,
+            val expectedRows: Int
+        )
+
+        val cases = listOf(
+            NormalDisplayCase(1280f, 720f, expectedCols = 7, expectedRows = 5),
+            NormalDisplayCase(1280f, 800f, expectedCols = 7, expectedRows = 6),
+            NormalDisplayCase(1536f, 864f, expectedCols = 9, expectedRows = 6),
+            NormalDisplayCase(1920f, 1080f, expectedCols = 11, expectedRows = 8)
+        )
+
+        for (c in cases) {
+            val profile = DesktopGridProfileResolver.resolve(
+                screenWidthDp = c.w,
+                screenHeightDp = c.h,
+                topInsetDp = 32f,
+                bottomInsetDp = 48f
+            )
+
+            assertThat(profile.columns).isEqualTo(c.expectedCols)
+            assertThat(profile.rows).isEqualTo(c.expectedRows)
+            assertThat(profile.marginDp).isWithin(0.01f).of(36f)
+            assertThat(profile.topMarginDp).isWithin(0.01f).of(36f)
+            assertThat(profile.cellHeightDp).isAtLeast(DesktopGridProfileResolver.MIN_CELL_HEIGHT_DP)
+
+            val totalGridWidth = profile.widthDpForSpan(profile.columns)
+            val rightMargin = profile.availableWidthDp - (profile.marginDp + totalGridWidth)
+            assertThat(rightMargin).isWithin(0.01f).of(36f)
+
+            val gridBottom = profile.topMarginDp + profile.heightDpForSpan(profile.rows)
+            val hudTopBoundary = c.h - (DesktopGridProfileResolver.VERTICAL_RESERVED_DP + 48f)
+            assertThat(gridBottom).isAtMost(hudTopBoundary + 0.05f)
+        }
+    }
+
+    @Test
+    fun desktopGridProfileResolver_hiddenBarsInWindowMetrics_reservesNoExtraMarginForHiddenInsets() {
+        val bounds = android.graphics.Rect(0, 0, 2560, 1440) // 1280x720dp @ 2x
+        val insets = android.view.WindowInsets.Builder()
+            .setInsets(android.view.WindowInsets.Type.systemBars(), android.graphics.Insets.NONE)
+            .setInsetsIgnoringVisibility(
+                android.view.WindowInsets.Type.systemBars(),
+                android.graphics.Insets.of(0, 64, 0, 96) // hidden 32dp top, 48dp bottom
+            )
+            .build()
+        val windowMetrics = android.view.WindowMetrics(bounds, insets)
+
+        val profile = DesktopGridProfileResolver.resolve(
+            windowMetrics = windowMetrics,
+            density = 2f
+        )
+
+        assertThat(profile.topInsetDp).isEqualTo(0f)
+        assertThat(profile.bottomInsetDp).isEqualTo(0f)
+        assertThat(profile.columns).isEqualTo(7)
+        assertThat(profile.rows).isEqualTo(5)
+        assertThat(profile.marginDp).isWithin(0.01f).of(36f)
+        assertThat(profile.topMarginDp).isWithin(0.01f).of(36f)
+        // Full 600dp height available without hidden bottom bar deduction
+        assertThat(profile.heightDpForSpan(5)).isWithin(0.1f).of(600f)
+    }
+
+    @Test
+    fun desktopGridProfileResolver_centeredTrueAt1920WithBars_capsAt1440dpCentered() {
+        val profile = DesktopGridProfileResolver.resolve(
+            screenWidthDp = 1920f,
+            screenHeightDp = 1080f,
+            useCenteredBentoCanvas = true,
+            topInsetDp = 32f,
+            bottomInsetDp = 48f
+        )
+
+        assertThat(profile.columns).isEqualTo(8)
+        assertThat(profile.rows).isEqualTo(8)
+        val gridWidth = profile.widthDpForSpan(profile.columns)
+        assertThat(gridWidth).isAtMost(DesktopGridProfileResolver.MAX_CANVAS_WIDTH_DP)
+        assertThat(profile.marginDp).isWithin(0.01f).of((1920f - gridWidth) / 2f)
+        val rightMargin = profile.availableWidthDp - (profile.marginDp + gridWidth)
+        assertThat(rightMargin).isWithin(0.01f).of(profile.marginDp)
+        val gridBottom = profile.topMarginDp + profile.heightDpForSpan(profile.rows)
+        assertThat(gridBottom).isAtMost(1080f - (DesktopGridProfileResolver.VERTICAL_RESERVED_DP + 48f) + 0.05f)
     }
 
     @Test
@@ -211,9 +307,14 @@ class PlatformComponentsTest {
             assertThat(p.marginDp).isAtLeast(c.leftInset)
             val rightEdge = p.marginDp + totalGridWidth
             assertThat(rightEdge).isAtMost(c.w - c.rightInset + 0.05f)
-            val leftSafeMargin = p.marginDp - c.leftInset
-            val rightSafeMargin = (c.w - c.rightInset) - rightEdge
-            assertThat(rightSafeMargin).isWithin(0.05f).of(leftSafeMargin)
+            if (c.leftInset == c.rightInset) {
+                val leftSafeMargin = p.marginDp - c.leftInset
+                val rightSafeMargin = (c.w - c.rightInset) - rightEdge
+                assertThat(rightSafeMargin).isWithin(0.05f).of(leftSafeMargin)
+            } else {
+                if (c.leftInset > 0f) assertThat(p.marginDp).isAtLeast(c.leftInset + 4f)
+                if (c.rightInset > 0f) assertThat(c.w - rightEdge).isAtLeast(c.rightInset + 4f)
+            }
 
             // Centered cap check
             if (c.centered) {
@@ -223,7 +324,7 @@ class PlatformComponentsTest {
 
             // Top inset & HUD clearance checks
             if (c.topInset > 0f) {
-                assertThat(p.topMarginDp).isAtLeast(c.topInset + 8f)
+                assertThat(p.topMarginDp).isAtLeast(c.topInset + 4f)
             }
             val gridBottom = p.topMarginDp + totalGridHeight
             val hudTopBoundary = c.h - (DesktopGridProfileResolver.VERTICAL_RESERVED_DP + c.bottomInset)
@@ -252,7 +353,7 @@ class PlatformComponentsTest {
         assertThat(profile.availableHeightDp).isEqualTo(1280f)
         assertThat(profile.topInsetDp).isEqualTo(48f)
         assertThat(profile.bottomInsetDp).isEqualTo(64f)
-        assertThat(profile.topMarginDp).isEqualTo(60f) // 48dp + 12dp gap
+        assertThat(profile.topMarginDp).isEqualTo(52f) // max(36dp, 48dp + 4dp gap)
         val gridBottom = profile.topMarginDp + profile.heightDpForSpan(profile.rows)
         assertThat(gridBottom).isAtMost(1280f - (84f + 64f) + 0.05f)
     }

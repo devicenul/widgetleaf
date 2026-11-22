@@ -21,7 +21,7 @@ data class OverlaySettings(
     val hotkeyAlt: Boolean = true,
     val hotkeyShift: Boolean = false,
     val hotkeyMeta: Boolean = false,
-    val useCenteredBentoCanvas: Boolean = true
+    val useCenteredBentoCanvas: Boolean = false
 ) {
 
     fun formatHotkeyLabel(): String {

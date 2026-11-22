@@ -93,7 +93,7 @@ fun WidgetGridPage(
     gridProfile: DesktopGridProfile,
     showEmptyCanvasHint: Boolean,
     editingWidgetId: Int?,
-    useCenteredBentoCanvas: Boolean = true,
+    useCenteredBentoCanvas: Boolean = false,
     draggingWidgetId: Int? = null,
     draggedWidget: PlacedWidget? = null,
     hoveredCell: Pair<Int, Int>? = null,

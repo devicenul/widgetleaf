@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -241,7 +242,7 @@ class WidgetDeckRepositoryTest {
         assertThat(initial.launchOnStartup).isFalse()
         assertThat(initial.topBarPosition).isEqualTo(TopBarPosition.LEFT)
         assertThat(initial.pinTopBarRightQsTile).isFalse()
-        assertThat(initial.useCenteredBentoCanvas).isTrue()
+        assertThat(initial.useCenteredBentoCanvas).isFalse()
 
         // Update settings
         repository.updateSettings { current ->
@@ -254,7 +255,7 @@ class WidgetDeckRepositoryTest {
                 launchOnStartup = true,
                 topBarPosition = TopBarPosition.RIGHT,
                 pinTopBarRightQsTile = true,
-                useCenteredBentoCanvas = false
+                useCenteredBentoCanvas = true
             )
         }
 
@@ -267,7 +268,45 @@ class WidgetDeckRepositoryTest {
         assertThat(updated.launchOnStartup).isTrue()
         assertThat(updated.topBarPosition).isEqualTo(TopBarPosition.RIGHT)
         assertThat(updated.pinTopBarRightQsTile).isTrue()
-        assertThat(updated.useCenteredBentoCanvas).isFalse()
+        assertThat(updated.useCenteredBentoCanvas).isTrue()
+    }
+
+    @Test
+    fun centeredCanvasOneTimeMigration_resetsExistingInstallOnceAndRespectsSubsequentUserToggle() = runTest {
+        val migrationFile = tempFolder.newFile("migration_settings.preferences_pb")
+        val rawMigrationDataStore = PreferenceDataStoreFactory.create(
+            scope = dataStoreScope,
+            produceFile = { migrationFile }
+        )
+
+        // Simulate existing v0.0.4 / v0.0.5-rc2 install where centered was persisted as true
+        // and the one-time migration key has not been written yet.
+        rawMigrationDataStore.edit { prefs ->
+            prefs[PreferencesDataStore.KEY_BLUR_RADIUS_DP] = 24
+            prefs[PreferencesDataStore.KEY_LAST_VIEWED_PAGE_INDEX] = 2
+            prefs[PreferencesDataStore.KEY_USE_CENTERED_BENTO_CANVAS] = true
+        }
+
+        val migratedStore = PreferencesDataStore(rawMigrationDataStore)
+        val afterMigration = migratedStore.settingsFlow.first()
+        assertThat(afterMigration.useCenteredBentoCanvas).isFalse()
+        assertThat(afterMigration.blurRadiusDp).isEqualTo(24)
+        assertThat(afterMigration.lastViewedPageIndex).isEqualTo(2)
+
+        val storedAfterMigration = rawMigrationDataStore.data.first()
+        assertThat(storedAfterMigration[PreferencesDataStore.KEY_MIGRATED_CENTERED_DEFAULT_OFF]).isTrue()
+        assertThat(storedAfterMigration[PreferencesDataStore.KEY_USE_CENTERED_BENTO_CANVAS]).isFalse()
+
+        // User explicitly turns Centered Bento Grid back ON
+        migratedStore.updateSettings { it.copy(useCenteredBentoCanvas = true) }
+        assertThat(migratedStore.settingsFlow.first().useCenteredBentoCanvas).isTrue()
+
+        // Simulate subsequent app restart with a fresh PreferencesDataStore wrapper on the same file:
+        // migration must NOT run a second time or override the user's explicit choice.
+        val restartedStore = PreferencesDataStore(rawMigrationDataStore)
+        val afterRestart = restartedStore.settingsFlow.first()
+        assertThat(afterRestart.useCenteredBentoCanvas).isTrue()
+        assertThat(afterRestart.blurRadiusDp).isEqualTo(24)
     }
 
     @Test

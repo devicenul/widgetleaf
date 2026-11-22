@@ -501,7 +501,7 @@ class DeckScreenComposeTest {
         // Settings footer displays versionName and versionCode
         composeTestRule.onNodeWithTag("settings_version_footer")
             .performScrollTo()
-            .assertTextEquals("WidgetLeaf v0.0.5 (8)")
+            .assertTextEquals("WidgetLeaf v0.0.5 (9)")
     }
 
     @Test
@@ -2253,5 +2253,75 @@ class DeckScreenComposeTest {
             .assertTextContains("No events recorded yet.", substring = true)
 
         io.devnullapps.widgetleaf.services.OverlayDiagnosticsLog.clear()
+    }
+
+    @Test
+    @Config(qualifiers = "w1280dp-h720dp-mdpi")
+    fun pageIndicatorHudWithNavigationBarInsets_doesNotOverlapBottomRowWidgetsAt1280x720() {
+        val profile = io.devnullapps.widgetleaf.platform.DesktopGridProfileResolver.resolve(
+            screenWidthDp = 1280f,
+            screenHeightDp = 720f,
+            useCenteredBentoCanvas = false,
+            topInsetDp = 32f,
+            bottomInsetDp = 48f
+        )
+        assertThat(profile.columns).isEqualTo(7)
+        assertThat(profile.rows).isEqualTo(5)
+
+        val bottomRowWidget = PlacedWidget(
+            appWidgetId = 999,
+            providerPackage = "com.test.bottom",
+            providerClass = "BottomRowWidget",
+            pageIndex = 0,
+            cellX = 3,
+            cellY = 4,
+            spanX = 2,
+            spanY = 1
+        )
+
+        composeTestRule.setContent {
+            val view = androidx.compose.ui.platform.LocalView.current
+            androidx.compose.runtime.SideEffect {
+                val insets = androidx.core.view.WindowInsetsCompat.Builder()
+                    .setInsets(
+                        androidx.core.view.WindowInsetsCompat.Type.statusBars(),
+                        androidx.core.graphics.Insets.of(0, 32, 0, 0)
+                    )
+                    .setInsets(
+                        androidx.core.view.WindowInsetsCompat.Type.navigationBars(),
+                        androidx.core.graphics.Insets.of(0, 0, 0, 48)
+                    )
+                    .build()
+                androidx.core.view.ViewCompat.dispatchApplyWindowInsets(view, insets)
+            }
+            Box(modifier = Modifier.size(1280.dp, 720.dp)) {
+                WidgetDeckOverlayScreen(
+                    uiState = DeckUiState(
+                        isReady = true,
+                        pages = listOf(DeckPage(pageIndex = 0)),
+                        widgets = listOf(bottomRowWidget),
+                        gridProfile = profile
+                    ),
+                    onDismissOverlay = {},
+                    onSelectPage = {},
+                    onPreviousPage = {},
+                    onNextPage = {},
+                    onOpenWidgetPicker = {},
+                    onCloseWidgetPicker = {},
+                    onSearchQueryChange = {},
+                    onAddWidgetAutoPlace = {},
+                    onOpenOverlaySettings = {},
+                    onCloseOverlaySettings = {},
+                    onUpdateSettings = {},
+                    onStartEditPageLabel = {},
+                    onCommitPageLabel = { _, _ -> }
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        val widgetBounds = composeTestRule.onNodeWithTag("placed_widget_999").getUnclippedBoundsInRoot()
+        val hudBounds = composeTestRule.onNodeWithTag("bottom_pagination_hud").getUnclippedBoundsInRoot()
+        assertThat(widgetBounds.bottom.value).isAtMost(hudBounds.top.value + 0.5f)
     }
 }

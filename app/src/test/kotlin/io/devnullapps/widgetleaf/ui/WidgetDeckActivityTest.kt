@@ -1155,20 +1155,93 @@ class WidgetDeckActivityTest {
 
     @Test
     @Config(qualifiers = "w1920dp-h1080dp-mdpi")
-    fun displayQualifier_1920x1080_centeredDefault_capsAt8Cols() {
-        assertActivityGridProfileMatches(expectedCols = 8, expectedRows = 8, maxWidthDp = 1920f, maxHeightDp = 1080f)
+    fun displayQualifier_1920x1080_defaultFullWidth_resolves11x8With36dpMargins_andCenteredCapsAt8Cols() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            val fullProfile = activity.viewModel.uiState.value.gridProfile
+            assertThat(fullProfile.columns).isEqualTo(11)
+            assertThat(fullProfile.rows).isEqualTo(8)
+            assertThat(fullProfile.marginDp).isWithin(0.05f).of(36f)
+            val fullWidth = fullProfile.widthDpForSpan(fullProfile.columns)
+            assertThat(1920f - (fullProfile.marginDp + fullWidth)).isWithin(0.05f).of(36f)
+            assertThat(fullProfile.topMarginDp + fullProfile.heightDpForSpan(fullProfile.rows))
+                .isAtMost(1080f - 84f + 0.5f)
+
+            // Toggling Centered Bento Grid ON caps width at 1440dp centered (8 columns)
+            activity.viewModel.updateSettings { it.copy(useCenteredBentoCanvas = true) }
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            val centeredProfile = activity.viewModel.uiState.value.gridProfile
+            assertThat(centeredProfile.columns).isEqualTo(8)
+            assertThat(centeredProfile.rows).isEqualTo(8)
+            assertThat(centeredProfile.widthDpForSpan(centeredProfile.columns))
+                .isAtMost(io.devnullapps.widgetleaf.platform.DesktopGridProfileResolver.MAX_CANVAS_WIDTH_DP + 0.5f)
+        } finally {
+            tearDownController(controller)
+        }
     }
 
     @Test
     @Config(qualifiers = "w2560dp-h1440dp-mdpi")
-    fun displayQualifier_2560x1440_centeredDefault_capsAt8Cols() {
-        assertActivityGridProfileMatches(expectedCols = 8, expectedRows = 11, maxWidthDp = 2560f, maxHeightDp = 1440f)
+    fun displayQualifier_2560x1440_defaultFullWidth_resolves16x11With36dpMargins() {
+        assertActivityGridProfileMatches(expectedCols = 16, expectedRows = 11, maxWidthDp = 2560f, maxHeightDp = 1440f)
     }
 
     @Test
     @Config(qualifiers = "w3440dp-h1440dp-mdpi")
-    fun displayQualifier_3440x1440_centeredDefault_capsAt8Cols() {
-        assertActivityGridProfileMatches(expectedCols = 8, expectedRows = 11, maxWidthDp = 3440f, maxHeightDp = 1440f)
+    fun displayQualifier_3440x1440_defaultFullWidth_resolves21x11With36dpMargins() {
+        assertActivityGridProfileMatches(expectedCols = 21, expectedRows = 11, maxWidthDp = 3440f, maxHeightDp = 1440f)
+    }
+
+    @Test
+    @Config(qualifiers = "w1280dp-h720dp-mdpi")
+    fun viewportMetricsWithInsets_notOverwrittenBySubsequentSettingsUpdate() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+            // Simulate BoxWithConstraints + WindowInsets reporting 1280x720 with 32dp top / 48dp bottom bars
+            val metricsField = WidgetDeckActivity::class.java.getDeclaredField("latestViewportMetrics")
+            metricsField.isAccessible = true
+            val simulatedMetrics = io.devnullapps.widgetleaf.ui.components.OverlayViewportMetrics(
+                widthDp = 1280f,
+                heightDp = 720f,
+                leftInsetDp = 0f,
+                topInsetDp = 32f,
+                rightInsetDp = 0f,
+                bottomInsetDp = 48f,
+                heightPx = 720f,
+                bottomInsetPx = 48f
+            )
+            metricsField.set(activity, simulatedMetrics)
+            val expectedProfile = io.devnullapps.widgetleaf.platform.DesktopGridProfileResolver.resolve(
+                screenWidthDp = 1280f,
+                screenHeightDp = 720f,
+                useCenteredBentoCanvas = false,
+                topInsetDp = 32f,
+                bottomInsetDp = 48f
+            )
+            activity.viewModel.updateGridProfile(expectedProfile)
+
+            // Updating an unrelated setting triggers LaunchedEffect(uiState.settings);
+            // it must preserve the BoxWithConstraints + WindowInsets profile instead of overwriting via resolve(context).
+            activity.viewModel.updateSettings { it.copy(blurRadiusDp = 20) }
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+            val activeProfile = activity.viewModel.uiState.value.gridProfile
+            assertThat(activeProfile).isEqualTo(expectedProfile)
+            assertThat(activeProfile.columns).isEqualTo(7)
+            assertThat(activeProfile.rows).isEqualTo(5)
+            assertThat(activeProfile.bottomInsetDp).isEqualTo(48f)
+        } finally {
+            tearDownController(controller)
+        }
     }
 
     @Test

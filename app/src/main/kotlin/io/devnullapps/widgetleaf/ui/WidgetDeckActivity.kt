@@ -48,6 +48,7 @@ import io.devnullapps.widgetleaf.services.ActiveDisplayLaunchHelper
 import io.devnullapps.widgetleaf.services.OverlayDiagnosticsLog
 import io.devnullapps.widgetleaf.services.WidgetDeckTileService
 import io.devnullapps.widgetleaf.ui.components.DefaultFramelessWidgetContent
+import io.devnullapps.widgetleaf.ui.components.OverlayViewportMetrics
 import io.devnullapps.widgetleaf.ui.components.WidgetDeckOverlayScreen
 import io.devnullapps.widgetleaf.ui.gesture.TrackpadGestureClassifier
 import io.devnullapps.widgetleaf.ui.gesture.TrackpadSwipeAccumulator
@@ -84,6 +85,7 @@ class WidgetDeckActivity : ComponentActivity() {
     private var lastHotkeyToggleUptimeMs: Long = -10_000L
     private var overlayContainerHeightPx: Float = 0f
     private var overlayBottomInsetPx: Float = 0f
+    private var latestViewportMetrics: OverlayViewportMetrics? = null
     private val trackpadSwipeAccumulator = TrackpadSwipeAccumulator()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingDeferredDismissRunnable: Runnable? = null
@@ -219,11 +221,25 @@ class WidgetDeckActivity : ComponentActivity() {
                     }
                 }
 
-                val updatedProfile = container.gridProfileResolver.resolve(
-                    context = this@WidgetDeckActivity,
-                    useCenteredBentoCanvas = settings.useCenteredBentoCanvas
-                )
-                viewModel.updateGridProfile(updatedProfile)
+                val metrics = latestViewportMetrics
+                if (metrics != null && metrics.widthDp > 10f && metrics.heightDp > 10f) {
+                    val updatedProfile = container.gridProfileResolver.resolve(
+                        screenWidthDp = metrics.widthDp,
+                        screenHeightDp = metrics.heightDp,
+                        useCenteredBentoCanvas = settings.useCenteredBentoCanvas,
+                        leftInsetDp = metrics.leftInsetDp,
+                        topInsetDp = metrics.topInsetDp,
+                        rightInsetDp = metrics.rightInsetDp,
+                        bottomInsetDp = metrics.bottomInsetDp
+                    )
+                    viewModel.updateGridProfile(updatedProfile)
+                } else {
+                    val updatedProfile = container.gridProfileResolver.resolve(
+                        context = this@WidgetDeckActivity,
+                        useCenteredBentoCanvas = settings.useCenteredBentoCanvas
+                    )
+                    viewModel.updateGridProfile(updatedProfile)
+                }
 
                 if (uiState.isSettingsLoaded) {
                     val prev = lastAppliedSettings
@@ -386,6 +402,7 @@ class WidgetDeckActivity : ComponentActivity() {
                     overlayContainerHeightPx = metrics.heightPx
                     overlayBottomInsetPx = metrics.bottomInsetPx
                     if (metrics.widthDp > 10f && metrics.heightDp > 10f) {
+                        latestViewportMetrics = metrics
                         val updatedProfile = container.gridProfileResolver.resolve(
                             screenWidthDp = metrics.widthDp,
                             screenHeightDp = metrics.heightDp,
@@ -421,6 +438,7 @@ class WidgetDeckActivity : ComponentActivity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         refreshDensityThresholds()
+        latestViewportMetrics = null
         if (::viewModel.isInitialized) {
             val settings = viewModel.uiState.value.settings
             container.blurController.updateBlurRadius(window, settings.blurRadiusDp)
@@ -1037,7 +1055,7 @@ class WidgetDeckActivity : ComponentActivity() {
                     val bottomInsetPx = if (overlayContainerHeightPx > 0f) {
                         overlayBottomInsetPx
                     } else {
-                        windowMetrics.windowInsets.getInsetsIgnoringVisibility(
+                        windowMetrics.windowInsets.getInsets(
                             android.view.WindowInsets.Type.navigationBars() or
                                 android.view.WindowInsets.Type.displayCutout()
                         ).bottom.toFloat()

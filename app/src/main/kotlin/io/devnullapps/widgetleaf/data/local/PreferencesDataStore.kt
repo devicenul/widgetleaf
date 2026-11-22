@@ -15,7 +15,11 @@ import io.devnullapps.widgetleaf.domain.model.OverlaySettings
 import io.devnullapps.widgetleaf.domain.model.TopBarPosition
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "widgetleaf_settings")
@@ -38,6 +42,7 @@ class PreferencesDataStore(
         val KEY_HOTKEY_SHIFT = booleanPreferencesKey("hotkey_shift")
         val KEY_HOTKEY_META = booleanPreferencesKey("hotkey_meta")
         val KEY_USE_CENTERED_BENTO_CANVAS = booleanPreferencesKey("use_centered_bento_canvas")
+        val KEY_MIGRATED_CENTERED_DEFAULT_OFF = booleanPreferencesKey("migrated_centered_bento_default_off")
         val KEY_LAST_GOOD_COLUMNS = intPreferencesKey("last_good_columns")
         val KEY_LAST_GOOD_ROWS = intPreferencesKey("last_good_rows")
 
@@ -63,6 +68,12 @@ class PreferencesDataStore(
                 TopBarPosition.RIGHT.name -> TopBarPosition.RIGHT
                 else -> TopBarPosition.LEFT
             }
+            val hasMigratedCenteredDefault = preferences[KEY_MIGRATED_CENTERED_DEFAULT_OFF] == true
+            val useCenteredBentoCanvas = if (hasMigratedCenteredDefault) {
+                preferences[KEY_USE_CENTERED_BENTO_CANVAS] ?: false
+            } else {
+                false
+            }
             return OverlaySettings(
                 blurRadiusDp = preferences[KEY_BLUR_RADIUS_DP] ?: 36,
                 scrimAlpha = preferences[KEY_SCRIM_ALPHA] ?: 0.72f,
@@ -77,12 +88,39 @@ class PreferencesDataStore(
                 hotkeyAlt = preferences[KEY_HOTKEY_ALT] ?: true,
                 hotkeyShift = preferences[KEY_HOTKEY_SHIFT] ?: false,
                 hotkeyMeta = preferences[KEY_HOTKEY_META] ?: false,
-                useCenteredBentoCanvas = preferences[KEY_USE_CENTERED_BENTO_CANVAS] ?: true
+                useCenteredBentoCanvas = useCenteredBentoCanvas
             )
         }
     }
 
+    private val migrationMutex = Mutex()
+
+    @Volatile
+    private var hasCheckedMigration: Boolean = false
+
+    suspend fun ensureMigrated() {
+        if (hasCheckedMigration) return
+        migrationMutex.withLock {
+            if (hasCheckedMigration) return
+            val currentPrefs = try {
+                dataStore.data.first()
+            } catch (_: IOException) {
+                emptyPreferences()
+            }
+            if (currentPrefs[KEY_MIGRATED_CENTERED_DEFAULT_OFF] != true) {
+                dataStore.edit { preferences ->
+                    if (preferences[KEY_MIGRATED_CENTERED_DEFAULT_OFF] != true) {
+                        preferences[KEY_USE_CENTERED_BENTO_CANVAS] = false
+                        preferences[KEY_MIGRATED_CENTERED_DEFAULT_OFF] = true
+                    }
+                }
+            }
+            hasCheckedMigration = true
+        }
+    }
+
     val settingsFlow: Flow<OverlaySettings> = dataStore.data
+        .onStart { ensureMigrated() }
         .catch { exception ->
             if (exception is IOException) {
                 emit(emptyPreferences())
@@ -117,6 +155,7 @@ class PreferencesDataStore(
     }
 
     suspend fun updateSettings(transform: (OverlaySettings) -> OverlaySettings) {
+        ensureMigrated()
         dataStore.edit { preferences ->
             val current = toOverlaySettings(preferences)
             val updated = transform(current)
@@ -134,6 +173,7 @@ class PreferencesDataStore(
             preferences[KEY_HOTKEY_SHIFT] = updated.hotkeyShift
             preferences[KEY_HOTKEY_META] = updated.hotkeyMeta
             preferences[KEY_USE_CENTERED_BENTO_CANVAS] = updated.useCenteredBentoCanvas
+            preferences[KEY_MIGRATED_CENTERED_DEFAULT_OFF] = true
 
             // Clean up legacy keys
             preferences.remove(KEY_LEGACY_PIN_TASKBAR_LEFT)
@@ -141,5 +181,6 @@ class PreferencesDataStore(
             preferences.remove(KEY_LEGACY_PIN_TOP_BAR_LEFT_STATUS_ICON)
             preferences.remove(KEY_LEGACY_PIN_TO_TOP_BAR)
         }
+        hasCheckedMigration = true
     }
 }

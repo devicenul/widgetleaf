@@ -64,6 +64,7 @@ class DeckViewModel(
     private var rawPersistedPages: List<DeckPage> = listOf(DeckPage(pageIndex = 0, customLabel = null))
     private var lastGoodProfile: DesktopGridProfile? = null
     private var persistedLastGoodGridSize: Pair<Int, Int>? = null
+    private var hasLoadedLastGoodGridSize: Boolean = false
     private val settingsUpdateMutex = Mutex()
     private var pendingSettingsMutations: Int = 0
 
@@ -244,6 +245,7 @@ class DeckViewModel(
 
         viewModelScope.launch {
             repository.lastGoodGridSizeFlow.collect { savedSize ->
+                hasLoadedLastGoodGridSize = true
                 persistedLastGoodGridSize = savedSize
                 if (savedSize != null) {
                     val current = _uiState.value.gridProfile
@@ -268,6 +270,7 @@ class DeckViewModel(
             val (snapshotPages, snapshotWidgets) = repository.getSnapshot()
             val loadedSettings = repository.settingsFlow.first()
             val savedLastGoodSize = repository.lastGoodGridSizeFlow.first()
+            hasLoadedLastGoodGridSize = true
             if (savedLastGoodSize != null) {
                 persistedLastGoodGridSize = savedLastGoodSize
             }
@@ -285,16 +288,35 @@ class DeckViewModel(
             val rawWidgets = snapshotWidgets
             val profile = _uiState.value.gridProfile
             val fitsRaw = !widgetsNeedReflow(rawWidgets, profile)
+            val rawBounds = minimumRawBoundingSize(rawWidgets)
+            val settingsAlignedWithProfile =
+                effectiveSettings.useCenteredBentoCanvas == _uiState.value.settings.useCenteredBentoCanvas
 
-            if (fitsRaw) {
+            if (rawWidgets.isNotEmpty() && settingsAlignedWithProfile) {
                 val saved = persistedLastGoodGridSize
-                if (rawWidgets.isNotEmpty() && (saved == null || (profile.columns >= saved.first && profile.rows >= saved.second && Pair(profile.columns, profile.rows) != saved))) {
-                    persistedLastGoodGridSize = Pair(profile.columns, profile.rows)
-                    repository.updateLastGoodGridSize(profile.columns, profile.rows)
+                val targetGood = if (saved == null) {
+                    Pair(maxOf(profile.columns, rawBounds.first), maxOf(profile.rows, rawBounds.second))
+                } else if (fitsRaw &&
+                    profile.columns >= saved.first &&
+                    profile.rows >= saved.second &&
+                    Pair(profile.columns, profile.rows) != saved
+                ) {
+                    Pair(profile.columns, profile.rows)
+                } else {
+                    null
+                }
+                if (targetGood != null) {
+                    persistedLastGoodGridSize = targetGood
+                    repository.updateLastGoodGridSize(targetGood.first, targetGood.second)
                 }
             }
             val effectiveProfile = getEffectiveGridProfile(profile)
-            if (lastGoodProfile == null || fitsRaw) {
+            val currentGood = lastGoodProfile
+            if (currentGood == null ||
+                fitsRaw ||
+                effectiveProfile.columns > currentGood.columns ||
+                effectiveProfile.rows > currentGood.rows
+            ) {
                 lastGoodProfile = effectiveProfile
             }
 
@@ -1708,18 +1730,28 @@ class DeckViewModel(
         val currentGood = lastGoodProfile
         val saved = persistedLastGoodGridSize
         val fitsRaw = !widgetsNeedReflow(rawPersistedWidgets, profile)
+        val rawBounds = minimumRawBoundingSize(rawPersistedWidgets)
+        if (hasLoadedLastGoodGridSize && saved == null && rawPersistedWidgets.isNotEmpty()) {
+            val initCols = maxOf(profile.columns, currentGood?.columns ?: 0, rawBounds.first)
+            val initRows = maxOf(profile.rows, currentGood?.rows ?: 0, rawBounds.second)
+            persistedLastGoodGridSize = Pair(initCols, initRows)
+            viewModelScope.launch {
+                repository.updateLastGoodGridSize(initCols, initRows)
+            }
+        }
+        val effectiveSaved = persistedLastGoodGridSize
         if (fitsRaw) {
-            val exceedsSaved = saved == null ||
-                (profile.columns >= saved.first && profile.rows >= saved.second)
+            val exceedsSaved = effectiveSaved == null ||
+                (profile.columns >= effectiveSaved.first && profile.rows >= effectiveSaved.second)
             val exceedsGood = currentGood == null ||
                 (profile.columns >= currentGood.columns && profile.rows >= currentGood.rows)
             if (exceedsSaved && exceedsGood) {
                 lastGoodProfile = profile
-            } else if (currentGood == null && saved != null) {
-                lastGoodProfile = buildBaselineProfile(saved.first, saved.second, profile)
+            } else if (currentGood == null && effectiveSaved != null) {
+                lastGoodProfile = buildBaselineProfile(effectiveSaved.first, effectiveSaved.second, profile)
             }
             if (rawPersistedWidgets.isNotEmpty() &&
-                (saved == null || (profile.columns >= saved.first && profile.rows >= saved.second && Pair(profile.columns, profile.rows) != saved))
+                (effectiveSaved == null || (profile.columns >= effectiveSaved.first && profile.rows >= effectiveSaved.second && Pair(profile.columns, profile.rows) != effectiveSaved))
             ) {
                 persistedLastGoodGridSize = Pair(profile.columns, profile.rows)
                 viewModelScope.launch {
@@ -1727,17 +1759,16 @@ class DeckViewModel(
                 }
             }
         } else {
-            val rawBounds = minimumRawBoundingSize(rawPersistedWidgets)
             val baselineCols = maxOf(
                 profile.columns,
                 currentGood?.columns ?: 0,
-                saved?.first ?: 0,
+                effectiveSaved?.first ?: 0,
                 rawBounds.first
             )
             val baselineRows = maxOf(
                 profile.rows,
                 currentGood?.rows ?: 0,
-                saved?.second ?: 0,
+                effectiveSaved?.second ?: 0,
                 rawBounds.second
             )
             lastGoodProfile = buildBaselineProfile(baselineCols, baselineRows, currentGood ?: profile)
@@ -1809,45 +1840,51 @@ class DeckViewModel(
         profile: DesktopGridProfile
     ): List<PlacedWidget> {
         val settled = mutableListOf<PlacedWidget>()
-        val sortedWidgets = widgets.sortedWith(compareBy({ it.pageIndex }, { it.cellY }, { it.cellX }))
+        val sortedWidgets = widgets.sortedWith(compareBy({ it.pageIndex }, { it.cellX }, { it.cellY }))
+        val outOfBounds = mutableListOf<PlacedWidget>()
 
+        // Pass 1: Settle ALL in-bounds widgets across ALL pages at their persisted cells first,
+        // preventing overflowed widgets on earlier pages from displacing in-bounds widgets on later pages.
         for (w in sortedWidgets) {
-            val clampedSpanX = w.spanX.coerceAtMost(profile.columns).coerceAtLeast(1)
-            val clampedSpanY = w.spanY.coerceAtMost(profile.rows).coerceAtLeast(1)
-
-            val candidateBounds = GridBounds(w.cellX, w.cellY, clampedSpanX, clampedSpanY)
             val settledOnSamePage = settled.filter { it.pageIndex == w.pageIndex }
-            val fitsAtCurrent = candidateBounds.isWithin(profile.columns, profile.rows) &&
-                settledOnSamePage.none { it.bounds.intersects(candidateBounds) }
-
+            val fitsAtCurrent = w.bounds.isWithin(profile.columns, profile.rows) &&
+                settledOnSamePage.none { it.bounds.intersects(w.bounds) }
             if (fitsAtCurrent) {
-                settled.add(w.copy(spanX = clampedSpanX, spanY = clampedSpanY))
+                settled.add(w)
             } else {
-                var targetPage = w.pageIndex
-                var placed = false
-                while (!placed) {
-                    val settledOnTarget = settled.filter { it.pageIndex == targetPage }
-                    val spot = gridCollisionResolver.findFirstAvailableSpot(
-                        spanX = clampedSpanX,
-                        spanY = clampedSpanY,
-                        existingOnPage = settledOnTarget,
-                        columns = profile.columns,
-                        rows = profile.rows
-                    )
-                    if (spot != null) {
-                        settled.add(
-                            w.copy(
-                                pageIndex = targetPage,
-                                cellX = spot.first,
-                                cellY = spot.second,
-                                spanX = clampedSpanX,
-                                spanY = clampedSpanY
-                            )
+                outOfBounds.add(w)
+            }
+        }
+
+        // Pass 2: Place remaining out-of-bounds widgets into free spots (own page first, column-major,
+        // then subsequent pages, then newly appended page).
+        for (w in outOfBounds) {
+            val clampedSpanX = w.spanX.coerceIn(1, profile.columns)
+            val clampedSpanY = w.spanY.coerceIn(1, profile.rows)
+            var targetPage = w.pageIndex.coerceAtLeast(0)
+            var placed = false
+            while (!placed) {
+                val settledOnTarget = settled.filter { it.pageIndex == targetPage }
+                val spot = gridCollisionResolver.findFirstAvailableSpot(
+                    spanX = clampedSpanX,
+                    spanY = clampedSpanY,
+                    existingOnPage = settledOnTarget,
+                    columns = profile.columns,
+                    rows = profile.rows
+                )
+                if (spot != null) {
+                    settled.add(
+                        w.copy(
+                            pageIndex = targetPage,
+                            cellX = spot.first,
+                            cellY = spot.second,
+                            spanX = clampedSpanX,
+                            spanY = clampedSpanY
                         )
-                        placed = true
-                    } else {
-                        targetPage++
-                    }
+                    )
+                    placed = true
+                } else {
+                    targetPage++
                 }
             }
         }
