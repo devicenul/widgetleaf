@@ -50,7 +50,7 @@ android {
         applicationId = "io.devnullapps.widgetleaf"
         minSdk = 31
         targetSdk = 35
-        versionCode = 7
+        versionCode = 8
         versionName = "0.0.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

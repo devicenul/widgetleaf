@@ -8,13 +8,14 @@
 
 ## 1. Mission & Functional Summary
 
-**WidgetLeaf** (`io.devnullapps.widgetleaf`, current version `v0.0.5`) is an on-demand, frosted-glass HUD and modular desktop widget overlay built for Android Desktop / Laptop environments ("Googlebook").
+**WidgetLeaf** (`io.devnullapps.widgetleaf`, current version `v0.0.5` / `versionCode 8`) is an on-demand, frosted-glass HUD and modular desktop widget overlay built for Android Desktop / Laptop environments ("Googlebook"), tablets, and external monitors.
 
-- **Ephemeral Flyleaf Overlay:** Triggered via the **Top Menu Bar leaf icon** (`WidgetLeafTopBarService`, configurable Left or Right position), **Global Hotkey** (default `Alt + W`, customizable in Overlay Settings), **Quick Settings tile** (`WidgetDeckTileService`), or **`ACTION_ASSIST`**.
-- **Full-Screen Frosted Glass Canvas:** Renders over the active desktop using hardware cross-window blur (`FLAG_BLUR_BEHIND`, `36dp`), dark scrim, ambient emerald radial glow, and `2%` procedural noise grain.
-- **Frameless Live Android Widgets:** Hosts real `AppWidgetHostView` instances (`DeckAppWidgetHostView`, host ID `1024`) on a responsive desktop Bento snap grid (`DesktopGridProfileResolver`) spanning full width with mathematically symmetric margins (`INV-14`). Forces host view padding to zero (INV-13) and syncs multi-orientation sizes so responsive RemoteViews layouts match grid cell dimensions with zero fallback truncation.
+- **Multi-Display Ephemeral Flyleaf Overlay:** Triggered via per-display **Top Menu Bar leaf icons** (`WidgetLeafTopBarService` maintaining independent `TYPE_ACCESSIBILITY_OVERLAY` windows across displays, configurable Left or Right, strictly hidden on displays lacking a top status bar), **Global Hotkey** (default `Alt + W`, customizable in Overlay Settings), **Quick Settings tile** (`WidgetDeckTileService`), ongoing silent notification (`StatusBarTriggerManager` -> `ToggleDeckShortcutActivity`), or **`ACTION_ASSIST`**. All triggers route launches to the active display (`ActiveDisplayLaunchHelper`).
+- **Full-Screen Frosted Glass Canvas:** Renders edge-to-edge (`LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS`, `systemBars ∪ displayCutout` safe insets) using hardware cross-window blur (`FLAG_BLUR_BEHIND`, `36dp`), dark scrim, ambient emerald radial glow, and a cached tiled `2%` procedural noise `ShaderBrush` (`createNoiseGrainBrush`).
+- **Frameless Live Android Widgets & Centered Bento Grid:** Hosts real `AppWidgetHostView` instances (`DeckAppWidgetHostView`, host ID `1024`) cached with environment keying (`HostViewEnvironment(displayId, densityDpi, uiMode)`) and safe `onDestroy()` cleanup (`releaseViewsForContext`) on a responsive Bento grid (`DesktopGridProfileResolver`). Supports optional 1440dp max canvas centering (`useCenteredBentoCanvas`, ON by default) vs full safe-area width on ultrawide monitors with mathematically symmetric safe margins and graceful small-window scaling (`INV-14`, `INV-24`). Forces host view padding to zero (`INV-13`) and syncs multi-orientation sizes so responsive `RemoteViews` layouts match grid cell dimensions.
 - **Desktop Pointer & Keyboard First:**
-  - **Normal Mode:** Widgets are live and interactive. Non-navigating widget interactions (broadcast/service `PendingIntent`s, checkboxes, list fill-ins, scrolling) keep the overlay open; WidgetLeaf dismisses only when an interaction actually launches another activity (`onStop` / `onUserLeaveHint` / `onPause` with lost focus or top-resumed state, INV-23). Clicking empty background or pressing `Escape` / any non-UI key (`Space`, letters, symbols) dismisses the overlay.
+  - **Normal Mode:** Widgets are live and interactive. Non-navigating widget interactions (broadcast/service `PendingIntent`s, checkboxes, list fill-ins, scrolling) and quick activity trampolines (e.g. Google Tasks checkbox actions) keep the overlay open; foreground-loss callbacks arm an `850ms` deferred dismissal (`INV-23`) with temporary window hide (`120ms` grace on pause/focus-loss or immediate on `onStop()`) that cancels and restores automatically if focus/resume returns, and dismisses only when an external app remains in the foreground. Clicking empty background or pressing `Escape` / any non-UI key (`Space`, letters, symbols) dismisses the overlay.
+  - **On-Device Diagnostics Trace:** Recent lifecycle, focus, widget interaction, deferred dismissal, and finish reasons (up to `50` events) are recorded in `OverlayDiagnosticsLog` and inspectable/copyable inside a collapsible **Diagnostics** section in `OverlaySettingsDialog`.
   - **Page Swipes & Dismiss Gestures (INV-18):**
     - **Page Swipes:** 1-finger horizontal touch swipe on overlay pane or 2-finger horizontal swipe on trackpad flips pages following content direction (swipe left → next page, swipe right → previous page). Strictly enforces boundaries (stops at Page 0 and last page; no wrap-around, no page creation by swipe). Operates over empty canvas and non-scrollable widgets; yields touch streams to widgets that can scroll horizontally in the gesture direction.
     - **Dismiss Swipes:** 1-finger vertical touch swipe or 2-finger vertical trackpad swipe (up or down) dismisses the overlay pane over empty background or over widgets that cannot scroll vertically in that direction (e.g. clocks, weather). Scrollable widgets (calendars, task lists) retain vertical scrolling.
@@ -55,7 +56,7 @@
 │   ├── ARCHITECTURE.md              # Clean 4-layer architecture & desktop surface mechanics
 │   └── INVARIANTS.md                # Non-negotiable invariants & hard-won bug preventions
 ├── app/
-│   ├── build.gradle.kts             # Versioning (v0.0.5), signing, Room KSP, Compose, JaCoCo
+│   ├── build.gradle.kts             # Versioning (v0.0.5 / versionCode 8), signing, Room KSP, Compose, JaCoCo
 │   └── src/
 │       ├── main/kotlin/io/devnullapps/widgetleaf/
 │       │   ├── WidgetLeafApp.kt     # Application entrypoint & AppContainer owner
@@ -71,19 +72,22 @@
 │       │   │   └── repository/      # DefaultWidgetDeckRepository (atomic transactions + page pruning)
 │       │   ├── platform/            # DesktopGridProfileResolver, AndroidWindowBlurController,
 │       │   │                        # AndroidWidgetHostGateway
-│       │   ├── services/            # WidgetLeafTopBarService (Accessibility top-bar leaf + hotkey),
-│       │   │                        # StatusBarSpaceScanner (BentoBar coexistence),
+│       │   ├── services/            # WidgetLeafTopBarService (multi-display Accessibility top-bar + hotkey),
+│       │   │                        # StatusBarSpaceScanner (per-display BentoBar + cutout coexistence),
+│       │   │                        # ActiveDisplayLaunchHelper, OverlayDiagnosticsLog,
 │       │   │                        # TaskbarPlacementManager, StatusBarTriggerManager,
 │       │   │                        # OverlaySettingsSideEffectController, BootCompletedReceiver,
 │       │   │                        # WidgetDeckTileService
 │       │   └── ui/
-│       │       ├── WidgetDeckActivity.kt        # Translucent overlay Activity & AppWidget bind flow
+│       │       ├── WidgetDeckActivity.kt               # Translucent overlay Activity & AppWidget bind flow
+│       │       ├── WidgetConfigureTrampolineActivity.kt # Isolated configure trampoline task
+│       │       ├── ToggleDeckShortcutActivity.kt       # Dynamic active-display shortcut & notification toggle
 │       │       ├── viewmodel/                   # DeckViewModel & DeckUiState
 │       │       ├── hostview/                    # WidgetDeckHost, DeckAppWidgetHostView & DeckWidgetHostContainer
 │       │       ├── theme/                       # Color, Theme, MotionSpec
 │       │       └── components/                  # WidgetDeckOverlayScreen, WidgetGridPage,
 │       │                                        # WidgetEditDragLayer, GlassSurfaceBox (WidgetEditResizeFrame),
-│       │                                        # BottomPaginationHud, DesktopContextMenu,
+│       │                                        # PageIndicatorHud, DesktopContextMenu,
 │       │                                        # WidgetPickerBottomSheet, OverlaySettingsDialog
 │       └── test/kotlin/io/devnullapps/widgetleaf/ # Robolectric + Compose UI + Domain unit tests
 └── docs/IMPLEMENTATION_PLAN.md      # Original design & implementation specification

@@ -501,7 +501,7 @@ class DeckScreenComposeTest {
         // Settings footer displays versionName and versionCode
         composeTestRule.onNodeWithTag("settings_version_footer")
             .performScrollTo()
-            .assertTextEquals("WidgetLeaf v0.0.5 (7)")
+            .assertTextEquals("WidgetLeaf v0.0.5 (8)")
     }
 
     @Test
