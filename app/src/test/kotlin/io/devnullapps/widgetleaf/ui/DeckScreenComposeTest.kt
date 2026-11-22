@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -2197,5 +2198,60 @@ class DeckScreenComposeTest {
         val settingsBounds = composeTestRule.onNodeWithTag("overlay_settings_dialog").getUnclippedBoundsInRoot()
         assertThat(settingsBounds.top.value).isAtLeast(0f - 0.5f)
         assertThat(settingsBounds.bottom.value).isAtMost(360f + 0.5f)
+    }
+
+    @Test
+    fun overlaySettingsDialog_diagnosticsSectionExpandsAndCopiesToClipboard() {
+        io.devnullapps.widgetleaf.services.OverlayDiagnosticsLog.clear()
+        io.devnullapps.widgetleaf.services.OverlayDiagnosticsLog.record(
+            "widget_interaction",
+            "appWidgetId=77"
+        )
+        io.devnullapps.widgetleaf.services.OverlayDiagnosticsLog.record(
+            "deferred_dismiss_cancelled",
+            "reason=onResume prevTrigger=user_leave_after_widget_click"
+        )
+
+        composeTestRule.setContent {
+            io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme {
+                io.devnullapps.widgetleaf.ui.components.OverlaySettingsDialog(
+                    isOpen = true,
+                    settings = OverlaySettings(),
+                    onUpdateSettings = {},
+                    onDismissRequest = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        // Collapsed by default
+        composeTestRule.onNodeWithTag("settings_diagnostics_content").assertDoesNotExist()
+
+        // Expand Diagnostics section
+        composeTestRule.onNodeWithTag("settings_diagnostics_toggle").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("settings_diagnostics_content").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_diagnostics_log_text")
+            .performScrollTo()
+            .assertTextContains("deferred_dismiss_cancelled", substring = true)
+
+        // Copy button copies formatted report to Android clipboard
+        composeTestRule.onNodeWithTag("settings_diagnostics_copy").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val clipboard = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val copiedText = clipboard.primaryClip?.getItemAt(0)?.text?.toString()
+        assertThat(copiedText).contains("appWidgetId=77")
+        assertThat(copiedText).contains("deferred_dismiss_cancelled")
+
+        // Clear button resets entries cleanly
+        composeTestRule.onNodeWithTag("settings_diagnostics_clear").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("settings_diagnostics_log_text")
+            .assertTextContains("No events recorded yet.", substring = true)
+
+        io.devnullapps.widgetleaf.services.OverlayDiagnosticsLog.clear()
     }
 }

@@ -16,6 +16,7 @@ import com.google.common.truth.Truth.assertThat
 import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 import io.devnullapps.widgetleaf.domain.model.WidgetCatalogItem
 import io.devnullapps.widgetleaf.services.ActiveDisplayLaunchHelper
+import io.devnullapps.widgetleaf.services.OverlayDiagnosticsLog
 import io.devnullapps.widgetleaf.ui.gesture.TrackpadGestureClassifier
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckUiState
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckViewModel
@@ -33,6 +34,7 @@ class WidgetDeckActivityTest {
 
     @Before
     fun setUp() {
+        OverlayDiagnosticsLog.clear()
         val context = ApplicationProvider.getApplicationContext<Application>()
         val shadowAppWidgetManager = Shadows.shadowOf(AppWidgetManager.getInstance(context))
         shadowAppWidgetManager.setAllowedToBindAppWidgets(true)
@@ -43,6 +45,7 @@ class WidgetDeckActivityTest {
     fun tearDown() {
         WidgetDeckActivity.activeInstance = null
         WidgetDeckActivity.isDeckVisible = false
+        OverlayDiagnosticsLog.clear()
         Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
     }
 
@@ -233,7 +236,15 @@ class WidgetDeckActivityTest {
             val method = WidgetDeckActivity::class.java.getDeclaredMethod("onUserLeaveHint")
             method.isAccessible = true
             method.invoke(activity)
+            // Deferred dismissal does NOT synchronously kill the Activity
+            assertThat(activity.isFinishing).isFalse()
+
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(
+                WidgetDeckActivity.DEFERRED_DISMISS_DELAY_MS + 50L,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+            )
             assertThat(activity.isFinishing).isTrue()
+            assertThat(OverlayDiagnosticsLog.formatReport()).contains("deferred_user_leave")
         } finally {
             tearDownController(controller)
         }
@@ -871,10 +882,10 @@ class WidgetDeckActivityTest {
     }
 
     @Test
-    fun activityLaunch_onStopOrFocusLossPauseAfterWidgetClick_dismissesOverlay() {
+    fun activityLaunch_onStopOrFocusLossPauseAfterWidgetClick_dismissesOverlayAfterDelay() {
         val context = ApplicationProvider.getApplicationContext<Application>()
 
-        // 1. Standard activity launch (onStop after widget click) dismisses overlay
+        // 1. Standard real app launch (onStop after widget click): hides immediately, finishes after delay
         val intent1 = Intent(context, WidgetDeckActivity::class.java)
         val controller1 = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent1).setup()
         try {
@@ -885,12 +896,20 @@ class WidgetDeckActivityTest {
             assertThat(activity1.isFinishing).isFalse()
 
             controller1.pause().stop()
+            assertThat(activity1.isFinishing).isFalse()
+            assertThat(activity1.window.decorView.alpha).isEqualTo(0f)
+
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(
+                WidgetDeckActivity.DEFERRED_DISMISS_DELAY_MS + 50L,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+            )
             assertThat(activity1.isFinishing).isTrue()
+            assertThat(OverlayDiagnosticsLog.formatReport()).contains("deferred_stop_after_widget_click")
         } finally {
             tearDownController(controller1)
         }
 
-        // 2. Desktop freeform launch (onPause + lost window focus / top-resumed without onStop) dismisses overlay
+        // 2. Desktop freeform launch (onPause + lost window focus / top-resumed without onStop) dismisses after delay
         val intent2 = Intent(context, WidgetDeckActivity::class.java)
         val controller2 = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent2).setup()
         try {
@@ -903,10 +922,92 @@ class WidgetDeckActivityTest {
             activity2.onWindowFocusChanged(false)
             activity2.onTopResumedActivityChanged(false)
             controller2.pause()
+            assertThat(activity2.isFinishing).isFalse()
+
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(
+                WidgetDeckActivity.TEMPORARY_HIDE_GRACE_MS + 30L,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+            )
+            assertThat(activity2.window.decorView.alpha).isEqualTo(0f)
+            assertThat(activity2.isFinishing).isFalse()
+
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(
+                WidgetDeckActivity.DEFERRED_DISMISS_DELAY_MS,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+            )
             assertThat(activity2.isFinishing).isTrue()
+            assertThat(OverlayDiagnosticsLog.formatReport()).contains("deferred_widget_click_foreground_loss")
         } finally {
             tearDownController(controller2)
         }
+    }
+
+    @Test
+    fun trampolineWidgetInteraction_pauseStopThenResumeWithinWindow_cancelsDismissalAndStaysOpen() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            val widgetId = setupHostedTestWidget(activity)
+
+            // User taps a Google Tasks checkbox backed by an activity trampoline
+            activity.onInteractiveWidgetClicked(widgetId)
+            val userLeaveMethod = WidgetDeckActivity::class.java.getDeclaredMethod("onUserLeaveHint")
+            userLeaveMethod.isAccessible = true
+            userLeaveMethod.invoke(activity)
+            activity.onWindowFocusChanged(false)
+            activity.onTopResumedActivityChanged(false)
+            controller.pause().stop()
+
+            // Within the grace window, temporarily hidden but NOT finished
+            assertThat(activity.isFinishing).isFalse()
+            assertThat(activity.window.decorView.alpha).isEqualTo(0f)
+
+            // 250ms later, trampoline finishes and focus returns to WidgetLeaf
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(
+                250L,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+            )
+            assertThat(activity.isFinishing).isFalse()
+
+            controller.start().resume()
+            activity.onTopResumedActivityChanged(true)
+            activity.onWindowFocusChanged(true)
+
+            // Advance well past the deferred window: must stay open and visible!
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(
+                WidgetDeckActivity.DEFERRED_DISMISS_DELAY_MS + 200L,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+            )
+            assertThat(activity.isFinishing).isFalse()
+            assertThat(activity.window.decorView.alpha).isEqualTo(1f)
+            assertThat(
+                activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            ).isEqualTo(0)
+            assertThat(WidgetDeckActivity.isDeckVisible).isTrue()
+            assertThat(OverlayDiagnosticsLog.formatReport()).contains("deferred_dismiss_cancelled")
+        } finally {
+            tearDownController(controller)
+        }
+    }
+
+    @Test
+    fun overlayDiagnosticsLog_ringBufferCapsAt50AndRecordsReasons() {
+        OverlayDiagnosticsLog.clear()
+        for (i in 1..60) {
+            OverlayDiagnosticsLog.record("evt_$i", "detail_$i", uptimeMs = i * 10L)
+        }
+        val entries = OverlayDiagnosticsLog.snapshot()
+        assertThat(entries).hasSize(OverlayDiagnosticsLog.MAX_EVENTS)
+        assertThat(entries.first().event).isEqualTo("evt_11")
+        assertThat(entries.last().event).isEqualTo("evt_60")
+
+        OverlayDiagnosticsLog.record("finish", "reason=key_escape", uptimeMs = 700L)
+        val report = OverlayDiagnosticsLog.formatReport()
+        assertThat(report).contains("Diagnostics (${OverlayDiagnosticsLog.MAX_EVENTS} events)")
+        assertThat(report).contains("finish: reason=key_escape")
+        assertThat(report).contains("[+100ms]")
     }
 
     @Test

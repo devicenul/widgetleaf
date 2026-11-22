@@ -1,5 +1,8 @@
 package io.devnullapps.widgetleaf.ui.components
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import android.view.KeyEvent
@@ -8,6 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,12 +60,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.devnullapps.widgetleaf.BuildConfig
 import io.devnullapps.widgetleaf.domain.model.OverlaySettings
 import io.devnullapps.widgetleaf.domain.model.TopBarPosition
+import io.devnullapps.widgetleaf.services.OverlayDiagnosticsLog
 import io.devnullapps.widgetleaf.services.WidgetLeafTopBarService
 import io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme
 import kotlinx.coroutines.delay
@@ -678,6 +684,15 @@ fun OverlaySettingsDialog(
                         testTag = "setting_centered_bento_canvas"
                     )
 
+                    HorizontalDivider(
+                        color = WidgetLeafTheme.palette.glassBorder,
+                        thickness = 0.5.dp,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+
+                    // Collapsible Diagnostics Section
+                    DiagnosticsSection(context = context, isDialogOpen = isOpen)
+
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         text = "WidgetLeaf v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
@@ -751,5 +766,166 @@ private fun SettingToggleRow(
             ),
             modifier = Modifier.testTag(testTag)
         )
+    }
+}
+
+@Composable
+private fun DiagnosticsSection(
+    context: Context,
+    isDialogOpen: Boolean
+) {
+    var expanded by remember(isDialogOpen) { mutableStateOf(false) }
+    var reportText by remember(isDialogOpen, expanded) {
+        mutableStateOf(OverlayDiagnosticsLog.formatReport())
+    }
+    var eventCount by remember(isDialogOpen, expanded) {
+        mutableStateOf(OverlayDiagnosticsLog.snapshot().size)
+    }
+    var copiedFeedback by remember { mutableStateOf(false) }
+
+    LaunchedEffect(copiedFeedback) {
+        if (copiedFeedback) {
+            delay(1500L)
+            copiedFeedback = false
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("settings_diagnostics_toggle")
+                .clip(RoundedCornerShape(10.dp))
+                .clickable {
+                    expanded = !expanded
+                    reportText = OverlayDiagnosticsLog.formatReport()
+                    eventCount = OverlayDiagnosticsLog.snapshot().size
+                }
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Diagnostics",
+                    color = WidgetLeafTheme.palette.textPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Recent lifecycle, focus & dismissal trace ($eventCount/${OverlayDiagnosticsLog.MAX_EVENTS})",
+                    color = WidgetLeafTheme.palette.textSecondary,
+                    fontSize = 12.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Text(
+                text = if (expanded) "Hide ▲" else "Show ▼",
+                color = WidgetLeafTheme.palette.leafBright,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+
+        if (expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(WidgetLeafTheme.palette.glassSurface)
+                    .border(
+                        0.5.dp,
+                        WidgetLeafTheme.palette.glassBorder,
+                        RoundedCornerShape(12.dp)
+                    )
+                    .padding(10.dp)
+                    .testTag("settings_diagnostics_content")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .testTag("settings_diagnostics_copy")
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(WidgetLeafTheme.palette.leafPrimary.copy(alpha = 0.22f))
+                            .border(
+                                0.5.dp,
+                                WidgetLeafTheme.palette.leafPrimary,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .clickable {
+                                val latestReport = OverlayDiagnosticsLog.formatReport()
+                                reportText = latestReport
+                                eventCount = OverlayDiagnosticsLog.snapshot().size
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                clipboard?.setPrimaryClip(
+                                    ClipData.newPlainText("WidgetLeaf Diagnostics", latestReport)
+                                )
+                                copiedFeedback = true
+                            }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = if (copiedFeedback) "Copied" else "Copy",
+                            color = WidgetLeafTheme.palette.leafBright,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .testTag("settings_diagnostics_clear")
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(WidgetLeafTheme.palette.glassSurfaceHover)
+                            .border(
+                                0.5.dp,
+                                WidgetLeafTheme.palette.glassBorder,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .clickable {
+                                OverlayDiagnosticsLog.clear()
+                                reportText = OverlayDiagnosticsLog.formatReport()
+                                eventCount = 0
+                                copiedFeedback = false
+                            }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Clear",
+                            color = WidgetLeafTheme.palette.textSecondary,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 180.dp)
+                        .verticalScroll(rememberScrollState())
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = reportText,
+                        color = WidgetLeafTheme.palette.textPrimary,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.testTag("settings_diagnostics_log_text")
+                    )
+                }
+            }
+        }
     }
 }

@@ -10,6 +10,8 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.service.quicksettings.TileService
 import android.view.KeyEvent
@@ -43,6 +45,7 @@ import io.devnullapps.widgetleaf.domain.model.OverlaySettings
 import java.lang.ref.WeakReference
 import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 import io.devnullapps.widgetleaf.services.ActiveDisplayLaunchHelper
+import io.devnullapps.widgetleaf.services.OverlayDiagnosticsLog
 import io.devnullapps.widgetleaf.services.WidgetDeckTileService
 import io.devnullapps.widgetleaf.ui.components.DefaultFramelessWidgetContent
 import io.devnullapps.widgetleaf.ui.components.WidgetDeckOverlayScreen
@@ -73,6 +76,7 @@ class WidgetDeckActivity : ComponentActivity() {
     private var lastSecondaryClickUptimeMs: Long = -10_000L
     private var lastWidgetMutationOrFlowUptimeMs: Long = -10_000L
     private var lastInteractiveWidgetClickUptimeMs: Long = -10_000L
+    private var lastInteractiveWidgetClickId: Int = -1
     private var isActivityPaused: Boolean = false
     private var isActivityTopResumed: Boolean = true
     private var hasActivityWindowFocus: Boolean = true
@@ -81,6 +85,12 @@ class WidgetDeckActivity : ComponentActivity() {
     private var overlayContainerHeightPx: Float = 0f
     private var overlayBottomInsetPx: Float = 0f
     private val trackpadSwipeAccumulator = TrackpadSwipeAccumulator()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingDeferredDismissRunnable: Runnable? = null
+    private var pendingDeferredDismissTrigger: String? = null
+    private var pendingDeferredDismissRequirePauseOrFocusLoss: Boolean = true
+    private var pendingTemporaryHideRunnable: Runnable? = null
+    private var isTemporarilyHiddenForDeferredDismiss: Boolean = false
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -106,6 +116,10 @@ class WidgetDeckActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         creationUptimeMs = SystemClock.uptimeMillis()
         activeInstance = this
+        OverlayDiagnosticsLog.record(
+            "onCreate",
+            "action=${intent?.action} displayId=${ActiveDisplayLaunchHelper.getActiveDisplayId(this)}"
+        )
         refreshDensityThresholds()
         reassertOverlayPresentation()
 
@@ -151,10 +165,10 @@ class WidgetDeckActivity : ComponentActivity() {
                     if (::viewModel.isInitialized) {
                         val consumed = viewModel.handleEscapeKey()
                         if (!consumed) {
-                            finishWithoutAnimation()
+                            finishWithoutAnimation("back_key")
                         }
                     } else {
-                        finishWithoutAnimation()
+                        finishWithoutAnimation("back_key_early")
                     }
                 }
             }
@@ -287,7 +301,7 @@ class WidgetDeckActivity : ComponentActivity() {
                                 easing = MotionSpec.OverlayExitEasing
                             )
                         )
-                        finishWithoutAnimation()
+                        finishWithoutAnimation("ui_exit_animation")
                     }
                 }
             }
@@ -468,15 +482,22 @@ class WidgetDeckActivity : ComponentActivity() {
 
     /**
      * Records an interactive widget touch interaction without dismissing the overlay.
-     * Broadcast/service PendingIntents, CompoundButton responses, and list fill-in updates
-     * keep the pane open; dismissal happens only if foreground actually shifts to another
-     * activity (`onStop`, `onUserLeaveHint`, or `onPause` with lost focus / top-resumed state).
+     * Broadcast/service PendingIntents, CompoundButton responses, list fill-in updates, and
+     * short activity trampolines keep the pane open; foreground-loss lifecycle callbacks only
+     * schedule a deferred dismissal that cancels if focus/resume returns quickly (INV-23).
      */
     internal fun onInteractiveWidgetClicked(appWidgetId: Int) {
         if (::viewModel.isInitialized && (viewModel.uiState.value.editingWidgetId != null || hasOverlayModalOpen())) {
             return
         }
-        lastInteractiveWidgetClickUptimeMs = SystemClock.uptimeMillis()
+        val now = SystemClock.uptimeMillis()
+        val isDuplicateForSameUp = lastInteractiveWidgetClickId == appWidgetId &&
+            (now - lastInteractiveWidgetClickUptimeMs) in 0L..5L
+        lastInteractiveWidgetClickUptimeMs = now
+        lastInteractiveWidgetClickId = appWidgetId
+        if (!isDuplicateForSameUp) {
+            OverlayDiagnosticsLog.record("widget_interaction", "appWidgetId=$appWidgetId")
+        }
     }
 
     private fun isRecentInteractiveWidgetClick(nowMs: Long = SystemClock.uptimeMillis()): Boolean {
@@ -511,7 +532,137 @@ class WidgetDeckActivity : ComponentActivity() {
         if (hasActivityWindowFocus && isActivityTopResumed) return
         if (!isRecentInteractiveWidgetClick()) return
         if (isInternalFlowOrSystemPromptActive() || hasOverlayModalOpen()) return
-        finishWithoutAnimation()
+        scheduleDeferredDismiss(
+            reason = "widget_click_foreground_loss",
+            hideImmediately = false,
+            requirePauseOrFocusLoss = true
+        )
+    }
+
+    private fun scheduleDeferredDismiss(
+        reason: String,
+        hideImmediately: Boolean,
+        requirePauseOrFocusLoss: Boolean = true
+    ) {
+        if (isFinishing || isDestroyed || isChangingConfigurations) return
+        if (isInternalFlowOrSystemPromptActive() || hasOverlayModalOpen()) return
+
+        if (hideImmediately) {
+            cancelPendingTemporaryHideRunnable()
+            applyTemporaryHideForDeferredDismiss()
+        } else if (pendingTemporaryHideRunnable == null && !isTemporarilyHiddenForDeferredDismiss) {
+            val hideRunnable = Runnable {
+                pendingTemporaryHideRunnable = null
+                if (!isFinishing &&
+                    !isDestroyed &&
+                    !isChangingConfigurations &&
+                    pendingDeferredDismissRunnable != null &&
+                    (isActivityPaused || !hasActivityWindowFocus || !isActivityTopResumed)
+                ) {
+                    applyTemporaryHideForDeferredDismiss()
+                }
+            }
+            pendingTemporaryHideRunnable = hideRunnable
+            mainHandler.postDelayed(hideRunnable, TEMPORARY_HIDE_GRACE_MS)
+        }
+
+        if (pendingDeferredDismissRunnable != null) {
+            if (!requirePauseOrFocusLoss) {
+                pendingDeferredDismissRequirePauseOrFocusLoss = false
+            }
+            return
+        }
+
+        pendingDeferredDismissTrigger = reason
+        pendingDeferredDismissRequirePauseOrFocusLoss = requirePauseOrFocusLoss
+        OverlayDiagnosticsLog.record(
+            "deferred_dismiss_scheduled",
+            "trigger=$reason delayMs=$DEFERRED_DISMISS_DELAY_MS recentWidgetClick=${isRecentInteractiveWidgetClick()}"
+        )
+
+        val runnable = Runnable {
+            pendingDeferredDismissRunnable = null
+            val trigger = pendingDeferredDismissTrigger ?: reason
+            val requireLoss = pendingDeferredDismissRequirePauseOrFocusLoss
+            pendingDeferredDismissTrigger = null
+            pendingDeferredDismissRequirePauseOrFocusLoss = true
+            cancelPendingTemporaryHideRunnable()
+            if (isFinishing || isDestroyed || isChangingConfigurations) return@Runnable
+            if (isInternalFlowOrSystemPromptActive() || hasOverlayModalOpen()) {
+                restoreFromTemporaryHide()
+                OverlayDiagnosticsLog.record("deferred_dismiss_aborted", "modal_or_internal trigger=$trigger")
+                return@Runnable
+            }
+            val pausedOrUnfocused = isActivityPaused || !hasActivityWindowFocus || !isActivityTopResumed
+            if (requireLoss && !pausedOrUnfocused) {
+                restoreFromTemporaryHide()
+                OverlayDiagnosticsLog.record("deferred_dismiss_aborted", "regained_foreground trigger=$trigger")
+                return@Runnable
+            }
+            finishWithoutAnimation("deferred_$trigger")
+        }
+        pendingDeferredDismissRunnable = runnable
+        mainHandler.postDelayed(runnable, DEFERRED_DISMISS_DELAY_MS)
+    }
+
+    private fun cancelDeferredDismissal(reason: String) {
+        cancelPendingTemporaryHideRunnable()
+        val hadPending = pendingDeferredDismissRunnable != null
+        pendingDeferredDismissRunnable?.let {
+            mainHandler.removeCallbacks(it)
+            pendingDeferredDismissRunnable = null
+        }
+        val prevTrigger = pendingDeferredDismissTrigger
+        pendingDeferredDismissTrigger = null
+        pendingDeferredDismissRequirePauseOrFocusLoss = true
+        if (hadPending) {
+            OverlayDiagnosticsLog.record(
+                "deferred_dismiss_cancelled",
+                "reason=$reason prevTrigger=$prevTrigger"
+            )
+        }
+        restoreFromTemporaryHide()
+    }
+
+    private fun cancelPendingTemporaryHideRunnable() {
+        pendingTemporaryHideRunnable?.let {
+            mainHandler.removeCallbacks(it)
+            pendingTemporaryHideRunnable = null
+        }
+    }
+
+    private fun applyTemporaryHideForDeferredDismiss() {
+        if (isTemporarilyHiddenForDeferredDismiss) return
+        isTemporarilyHiddenForDeferredDismiss = true
+        try {
+            window?.decorView?.alpha = 0f
+            window?.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+            container.blurController.detachFromWindow(window)
+        } catch (_: Throwable) {
+        }
+        OverlayDiagnosticsLog.record("temporary_hide", "applied=true")
+    }
+
+    private fun restoreFromTemporaryHide() {
+        if (!isTemporarilyHiddenForDeferredDismiss) return
+        isTemporarilyHiddenForDeferredDismiss = false
+        try {
+            window?.decorView?.alpha = 1f
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+            val blurRadius = if (::viewModel.isInitialized) {
+                viewModel.uiState.value.settings.blurRadiusDp
+            } else {
+                36
+            }
+            container.blurController.attachToWindow(window, blurRadius)
+        } catch (_: Throwable) {
+        }
+        OverlayDiagnosticsLog.record("temporary_hide", "applied=false")
+    }
+
+    internal fun dismissFromExternalTrigger(reason: String) {
+        cancelDeferredDismissal("external_trigger_$reason")
+        finishWithoutAnimation(reason)
     }
 
     private fun launchWidgetConfigurationTrampoline(
@@ -546,7 +697,7 @@ class WidgetDeckActivity : ComponentActivity() {
         }
         val options = createConfigureLaunchOptions()
         startActivity(intent, options.toBundle())
-        finishWithoutAnimation()
+        finishWithoutAnimation("launch_configure_trampoline")
     }
 
     internal fun createConfigureLaunchOptions(): ActivityOptions {
@@ -607,6 +758,12 @@ class WidgetDeckActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        OverlayDiagnosticsLog.record(
+            "onNewIntent",
+            "action=${intent.action} wasResumed=$wasAlreadyResumed visible=$isDeckVisible paused=$isActivityPaused"
+        )
+        val shouldToggleClosed = wasAlreadyResumed && isDeckVisible && !isActivityPaused
+        cancelDeferredDismissal("onNewIntent:${intent.action}")
         val targetPageOverride = intent.getIntExtra(ActiveDisplayLaunchHelper.EXTRA_TARGET_PAGE_INDEX, -1).takeIf { it >= 0 }
         if (targetPageOverride != null) {
             intent.removeExtra(ActiveDisplayLaunchHelper.EXTRA_TARGET_PAGE_INDEX)
@@ -616,13 +773,13 @@ class WidgetDeckActivity : ComponentActivity() {
         if (intent.action == ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK ||
             intent.action == Intent.ACTION_ASSIST
         ) {
-            if (now - lastHotkeyToggleUptimeMs >= 350L) {
+            if (shouldToggleClosed && now - lastHotkeyToggleUptimeMs >= 350L) {
                 lastHotkeyToggleUptimeMs = now
-                finishWithoutAnimation()
+                finishWithoutAnimation("new_intent_toggle")
             }
             return
         }
-        handleIncomingIntent(intent, isNewIntentWhileVisible = wasAlreadyResumed)
+        handleIncomingIntent(intent, isNewIntentWhileVisible = shouldToggleClosed)
     }
 
     private fun handleIncomingIntent(intent: Intent?, isNewIntentWhileVisible: Boolean) {
@@ -637,7 +794,7 @@ class WidgetDeckActivity : ComponentActivity() {
             ActiveDisplayLaunchHelper.ACTION_TOGGLE_DECK,
             Intent.ACTION_ASSIST -> {
                 if (isNewIntentWhileVisible) {
-                    finishWithoutAnimation()
+                    finishWithoutAnimation("incoming_intent_toggle")
                 }
             }
         }
@@ -647,6 +804,7 @@ class WidgetDeckActivity : ComponentActivity() {
         super.onStart()
         activeInstance = this
         container.widgetHostGateway.startListening()
+        OverlayDiagnosticsLog.record("onStart")
     }
 
     override fun onResume() {
@@ -658,6 +816,12 @@ class WidgetDeckActivity : ComponentActivity() {
         isActivityTopResumed = true
         isAwaitingInternalSystemPrompt = false
         lastInteractiveWidgetClickUptimeMs = -10_000L
+        lastInteractiveWidgetClickId = -1
+        cancelDeferredDismissal("onResume")
+        OverlayDiagnosticsLog.record(
+            "onResume",
+            "displayId=${ActiveDisplayLaunchHelper.getActiveDisplayId(this)}"
+        )
         if (::viewModel.isInitialized && viewModel.uiState.value.pendingWidgetAction == null) {
             viewModel.markLaunchingInternalFlow(false)
         }
@@ -688,13 +852,23 @@ class WidgetDeckActivity : ComponentActivity() {
         isDeckVisible = false
         wasAlreadyResumed = false
         super.onPause()
+        OverlayDiagnosticsLog.record(
+            "onPause",
+            "finishing=$isFinishing focus=$hasActivityWindowFocus topResumed=$isActivityTopResumed recentWidgetClick=${isRecentInteractiveWidgetClick()}"
+        )
         evaluateForegroundLossDismissalAfterWidgetClick()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         hasActivityWindowFocus = hasFocus
-        if (!hasFocus) {
+        OverlayDiagnosticsLog.record(
+            "onWindowFocusChanged",
+            "hasFocus=$hasFocus paused=$isActivityPaused topResumed=$isActivityTopResumed"
+        )
+        if (hasFocus) {
+            cancelDeferredDismissal("window_focus_regained")
+        } else {
             evaluateForegroundLossDismissalAfterWidgetClick()
         }
     }
@@ -702,7 +876,13 @@ class WidgetDeckActivity : ComponentActivity() {
     override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
         super.onTopResumedActivityChanged(isTopResumedActivity)
         isActivityTopResumed = isTopResumedActivity
-        if (!isTopResumedActivity) {
+        OverlayDiagnosticsLog.record(
+            "onTopResumedActivityChanged",
+            "isTop=$isTopResumedActivity paused=$isActivityPaused focus=$hasActivityWindowFocus"
+        )
+        if (isTopResumedActivity && !isActivityPaused) {
+            cancelDeferredDismissal("top_resumed_regained")
+        } else if (!isTopResumedActivity) {
             evaluateForegroundLossDismissalAfterWidgetClick()
         }
     }
@@ -710,35 +890,63 @@ class WidgetDeckActivity : ComponentActivity() {
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         val now = SystemClock.uptimeMillis()
-        if (now - lastSecondaryClickUptimeMs < 600L ||
-            now - lastWidgetMutationOrFlowUptimeMs < 1500L ||
-            isInternalFlowOrSystemPromptActive()
-        ) {
+        val recentSecondary = now - lastSecondaryClickUptimeMs < 600L
+        val recentMutation = now - lastWidgetMutationOrFlowUptimeMs < 1500L
+        val internalActive = isInternalFlowOrSystemPromptActive()
+        val modalOpen = hasOverlayModalOpen()
+        val recentWidgetClick = isRecentInteractiveWidgetClick(now)
+        OverlayDiagnosticsLog.record(
+            "onUserLeaveHint",
+            "recentWidgetClick=$recentWidgetClick recentSecondary=$recentSecondary recentMutation=$recentMutation internal=$internalActive modal=$modalOpen"
+        )
+        if (recentSecondary || recentMutation || internalActive || modalOpen) {
             return
         }
         if (::viewModel.isInitialized && viewModel.shouldAutoDismissOnUserLeave()) {
-            finishWithoutAnimation()
+            scheduleDeferredDismiss(
+                reason = if (recentWidgetClick) "user_leave_after_widget_click" else "user_leave",
+                hideImmediately = !recentWidgetClick,
+                requirePauseOrFocusLoss = recentWidgetClick
+            )
         }
     }
 
     override fun onStop() {
-        val shouldDismissOnStop = !isFinishing &&
+        val recentWidgetClick = isRecentInteractiveWidgetClick()
+        val internalActive = isInternalFlowOrSystemPromptActive()
+        val modalOpen = hasOverlayModalOpen()
+        val shouldDeferOnStop = !isFinishing &&
+            !isDestroyed &&
             !isChangingConfigurations &&
-            !isInternalFlowOrSystemPromptActive() &&
-            !hasOverlayModalOpen() &&
-            isRecentInteractiveWidgetClick()
+            !internalActive &&
+            !modalOpen &&
+            (recentWidgetClick || pendingDeferredDismissRunnable != null)
+        OverlayDiagnosticsLog.record(
+            "onStop",
+            "recentWidgetClick=$recentWidgetClick internal=$internalActive modal=$modalOpen defer=$shouldDeferOnStop"
+        )
         container.widgetHostGateway.stopListening()
         if (activeInstance === this) {
             activeInstance = null
         }
         isDeckVisible = false
         super.onStop()
-        if (shouldDismissOnStop) {
-            finishWithoutAnimation()
+        if (shouldDeferOnStop) {
+            scheduleDeferredDismiss(
+                reason = "stop_after_widget_click",
+                hideImmediately = true,
+                requirePauseOrFocusLoss = true
+            )
         }
     }
 
     override fun onDestroy() {
+        OverlayDiagnosticsLog.record("onDestroy", "finishing=$isFinishing")
+        pendingDeferredDismissRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingDeferredDismissRunnable = null
+        pendingDeferredDismissTrigger = null
+        cancelPendingTemporaryHideRunnable()
+        mainHandler.removeCallbacksAndMessages(null)
         container.widgetDeckHost.releaseViewsForContext(this)
         container.blurController.detachFromWindow(window)
         if (activeInstance === this) {
@@ -876,7 +1084,8 @@ class WidgetDeckActivity : ComponentActivity() {
                             return true
                         }
                         TrackpadSwipeAccumulator.SwipeResult.DISMISS -> {
-                            finishWithoutAnimation()
+                            OverlayDiagnosticsLog.record("dismiss_trigger", "swipe_dismiss_trackpad")
+                            finishWithoutAnimation("swipe_dismiss_trackpad")
                             return true
                         }
                         TrackpadSwipeAccumulator.SwipeResult.NONE -> {
@@ -930,7 +1139,7 @@ class WidgetDeckActivity : ComponentActivity() {
             if (event.action == KeyEvent.ACTION_UP && ::viewModel.isInitialized) {
                 val consumed = viewModel.handleEscapeKey()
                 if (!consumed) {
-                    finishWithoutAnimation()
+                    finishWithoutAnimation("key_back")
                 }
             }
             return true
@@ -948,7 +1157,7 @@ class WidgetDeckActivity : ComponentActivity() {
             if (event.keyCode == KeyEvent.KEYCODE_ESCAPE) {
                 val consumed = viewModel.handleEscapeKey()
                 if (!consumed) {
-                    finishWithoutAnimation()
+                    finishWithoutAnimation("key_escape")
                 }
                 return true
             }
@@ -958,7 +1167,7 @@ class WidgetDeckActivity : ComponentActivity() {
                     val now = SystemClock.uptimeMillis()
                     if (now - lastHotkeyToggleUptimeMs >= 350L) {
                         lastHotkeyToggleUptimeMs = now
-                        finishWithoutAnimation()
+                        finishWithoutAnimation("key_hotkey")
                     }
                     return true
                 }
@@ -1047,7 +1256,8 @@ class WidgetDeckActivity : ComponentActivity() {
                 if (!isNonDismissingHardwareOrFocusKey(event.keyCode)) {
                     val sinceCreatedMs = SystemClock.uptimeMillis() - creationUptimeMs
                     if (sinceCreatedMs >= 300L) {
-                        finishWithoutAnimation()
+                        OverlayDiagnosticsLog.record("key_dismiss", "keyCode=${event.keyCode}")
+                        finishWithoutAnimation("key_${event.keyCode}")
                     }
                     return true
                 }
@@ -1056,7 +1266,12 @@ class WidgetDeckActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
-    private fun finishWithoutAnimation() {
+    private fun finishWithoutAnimation(reason: String = "unspecified") {
+        cancelPendingTemporaryHideRunnable()
+        pendingDeferredDismissRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingDeferredDismissRunnable = null
+        pendingDeferredDismissTrigger = null
+        OverlayDiagnosticsLog.record("finish", "reason=$reason")
         finish()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
@@ -1070,6 +1285,8 @@ class WidgetDeckActivity : ComponentActivity() {
         const val TAG = "WidgetDeckActivity"
         private const val REQUEST_CODE_CONFIGURE_WIDGET = 4042
         internal const val WIDGET_ACTIVITY_LAUNCH_WINDOW_MS = 2500L
+        internal const val DEFERRED_DISMISS_DELAY_MS = 850L
+        internal const val TEMPORARY_HIDE_GRACE_MS = 120L
         var testContainerOverride: AppContainer? = null
 
         private var activeInstanceRef: WeakReference<WidgetDeckActivity>? = null

@@ -56,6 +56,7 @@ import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 import io.devnullapps.widgetleaf.domain.model.WidgetCatalogItem
 import io.devnullapps.widgetleaf.domain.usecase.EdgeDirection
 import io.devnullapps.widgetleaf.platform.DesktopGridProfileResolver
+import io.devnullapps.widgetleaf.services.OverlayDiagnosticsLog
 import io.devnullapps.widgetleaf.ui.theme.MotionSpec
 import io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckUiState
@@ -282,7 +283,10 @@ fun WidgetDeckOverlayScreen(
                         onCancelChildTouches = onCancelChildTouches,
                         onSwipeNext = onSwipeNext,
                         onSwipePrevious = onSwipePrevious,
-                        onDismiss = onDismissOverlay
+                        onDismiss = {
+                            OverlayDiagnosticsLog.record("dismiss_trigger", "swipe_dismiss_touch")
+                            onDismissOverlay()
+                        }
                     )
             ) {
                 // LAYER 1: Optical Frost Scrim & 2% Tiled Procedural Noise Grain
@@ -394,7 +398,10 @@ fun WidgetDeckOverlayScreen(
                                     uiState.contextMenuPosition != null -> onCloseContextMenu()
                                     uiState.editingWidgetId != null -> onExitEditMode()
                                     uiState.editingPageLabelIndex != null -> onCancelEditPageLabel()
-                                    !uiState.isWidgetPickerOpen && !uiState.isOverlaySettingsOpen -> onDismissOverlay()
+                                    !uiState.isWidgetPickerOpen && !uiState.isOverlaySettingsOpen -> {
+                                        OverlayDiagnosticsLog.record("dismiss_trigger", "empty_canvas_tap")
+                                        onDismissOverlay()
+                                    }
                                 }
                             }
                         },

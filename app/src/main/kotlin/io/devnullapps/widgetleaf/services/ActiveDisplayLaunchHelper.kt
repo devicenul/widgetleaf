@@ -213,11 +213,11 @@ object ActiveDisplayLaunchHelper {
         if (active != null && !active.isFinishing && WidgetDeckActivity.isDeckVisible) {
             val activeDisplayId = getActiveDisplayId(active)
             if (action == ACTION_TOGGLE_DECK && activeDisplayId == displayId) {
-                active.finish()
+                active.dismissFromExternalTrigger("toggle_same_display")
                 return
             }
             if (activeDisplayId != displayId) {
-                active.finish()
+                active.dismissFromExternalTrigger("move_to_display_$displayId")
             }
         }
         launchOverlay(
