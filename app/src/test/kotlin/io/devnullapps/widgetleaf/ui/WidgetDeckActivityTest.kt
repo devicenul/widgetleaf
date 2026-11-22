@@ -995,4 +995,48 @@ class WidgetDeckActivityTest {
             tearDownController(controller)
         }
     }
+
+    @Test
+    fun onConfigurationChanged_updatesTrackpadDensityThresholds_andOnDestroyReleasesHostViews() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val customContainer = io.devnullapps.widgetleaf.di.AppContainer(context, useInMemoryDb = true)
+        WidgetDeckActivity.testContainerOverride = customContainer
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        val activity = controller.get()
+        try {
+            // Create a cached host view owned by this activity
+            customContainer.widgetDeckHost.createHostView(activity, 909, null)
+            assertThat(customContainer.widgetDeckHost.getHostView(909)).isNotNull()
+
+            // Simulate density change on Configuration
+            val newMetrics = android.util.DisplayMetrics().apply {
+                setTo(activity.resources.displayMetrics)
+                density = 2.5f
+                densityDpi = 400
+            }
+            @Suppress("DEPRECATION")
+            activity.resources.updateConfiguration(
+                android.content.res.Configuration(activity.resources.configuration).apply {
+                    densityDpi = 400
+                    screenWidthDp = 1280
+                    screenHeightDp = 720
+                },
+                newMetrics
+            )
+            activity.onConfigurationChanged(activity.resources.configuration)
+
+            val accField = WidgetDeckActivity::class.java.getDeclaredField("trackpadSwipeAccumulator")
+            accField.isAccessible = true
+            val acc = accField.get(activity) as io.devnullapps.widgetleaf.ui.gesture.TrackpadSwipeAccumulator
+            assertThat(acc.pageThresholdPx).isWithin(0.01f).of(48f * 2.5f)
+            assertThat(acc.dismissThresholdPx).isWithin(0.01f).of(72f * 2.5f)
+
+            tearDownController(controller)
+            assertThat(customContainer.widgetDeckHost.getHostView(909)).isNull()
+        } finally {
+            WidgetDeckActivity.testContainerOverride = null
+            tearDownController(controller)
+        }
+    }
 }

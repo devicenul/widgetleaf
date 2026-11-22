@@ -104,9 +104,7 @@ class WidgetDeckActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         creationUptimeMs = SystemClock.uptimeMillis()
         activeInstance = this
-        val density = resources.displayMetrics.density
-        trackpadSwipeAccumulator.pageThresholdPx = 48f * density
-        trackpadSwipeAccumulator.dismissThresholdPx = 72f * density
+        refreshDensityThresholds()
         reassertOverlayPresentation()
 
         viewModel = ViewModelProvider(
@@ -382,14 +380,27 @@ class WidgetDeckActivity : ComponentActivity() {
         }
     }
 
+    private fun refreshDensityThresholds() {
+        val density = resources.displayMetrics.density
+        trackpadSwipeAccumulator.pageThresholdPx = 48f * density
+        trackpadSwipeAccumulator.dismissThresholdPx = 72f * density
+    }
+
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        refreshDensityThresholds()
         if (::viewModel.isInitialized) {
+            val settings = viewModel.uiState.value.settings
+            container.blurController.updateBlurRadius(window, settings.blurRadiusDp)
+            val previousProfile = viewModel.uiState.value.gridProfile
             val updatedProfile = container.gridProfileResolver.resolve(
                 context = this,
-                useCenteredBentoCanvas = viewModel.uiState.value.settings.useCenteredBentoCanvas
+                useCenteredBentoCanvas = settings.useCenteredBentoCanvas
             )
             viewModel.updateGridProfile(updatedProfile)
+            if (updatedProfile == previousProfile) {
+                viewModel.resyncWidgetSizes()
+            }
         }
     }
 
@@ -706,6 +717,7 @@ class WidgetDeckActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        container.widgetDeckHost.releaseViewsForContext(this)
         container.blurController.detachFromWindow(window)
         if (activeInstance === this) {
             activeInstance = null

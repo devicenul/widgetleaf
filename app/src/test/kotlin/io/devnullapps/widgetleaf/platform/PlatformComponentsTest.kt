@@ -6,10 +6,14 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProviderInfo
 import android.content.ComponentName
 import android.content.Context
+import android.content.res.Configuration
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Bundle
+import android.util.DisplayMetrics
 import android.view.Window
 import android.view.WindowManager
+import org.robolectric.shadows.ShadowDisplayManager
 import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import io.devnullapps.widgetleaf.WidgetLeafApp
@@ -217,6 +221,78 @@ class PlatformComponentsTest {
         val parent2 = android.widget.FrameLayout(context)
         parent2.addView(reusedView)
         assertThat(reusedView.parent).isEqualTo(parent2)
+    }
+
+    @Test
+    fun widgetDeckHostRekeysOnDensityUiModeAndDisplayChange() {
+        val host = WidgetDeckHost(context)
+        val baseConfig = Configuration(context.resources.configuration).apply {
+            densityDpi = DisplayMetrics.DENSITY_MEDIUM
+            uiMode = Configuration.UI_MODE_NIGHT_NO
+        }
+        val ctxMdpi = context.createConfigurationContext(baseConfig)
+        val view1 = host.createHostView(ctxMdpi, 101, null)
+
+        val xxhdpiConfig = Configuration(baseConfig).apply {
+            densityDpi = DisplayMetrics.DENSITY_XXHIGH
+        }
+        val ctxXxhdpi = context.createConfigurationContext(xxhdpiConfig)
+        val view2 = host.createHostView(ctxXxhdpi, 101, null)
+        assertThat(view2).isNotSameInstanceAs(view1)
+        assertThat(host.cachedEnvironment(101)?.densityDpi).isEqualTo(DisplayMetrics.DENSITY_XXHIGH)
+
+        val nightConfig = Configuration(xxhdpiConfig).apply {
+            uiMode = Configuration.UI_MODE_NIGHT_YES
+        }
+        val ctxNight = context.createConfigurationContext(nightConfig)
+        val view3 = host.createHostView(ctxNight, 101, null)
+        assertThat(view3).isNotSameInstanceAs(view2)
+        assertThat(host.cachedEnvironment(101)?.uiMode).isEqualTo(Configuration.UI_MODE_NIGHT_YES)
+
+        val secDisplayId = ShadowDisplayManager.addDisplay("w1920dp-h1080dp-mdpi")
+        val dm = context.getSystemService(DisplayManager::class.java)
+        val secDisplay = dm.getDisplay(secDisplayId)!!
+        val secContext = context.createDisplayContext(secDisplay)
+        val view4 = host.createHostView(secContext, 101, null)
+        assertThat(view4).isNotSameInstanceAs(view3)
+        assertThat(host.cachedEnvironment(101)?.displayId).isEqualTo(secDisplayId)
+
+        ShadowDisplayManager.removeDisplay(secDisplayId)
+        host.clearViews()
+    }
+
+    @Test
+    fun widgetDeckHostReleasesOwnedActivityViewsWithoutClobberingNewActivity() {
+        val host = WidgetDeckHost(context)
+        val controller1 = Robolectric.buildActivity(Activity::class.java).setup()
+        val controller2 = Robolectric.buildActivity(Activity::class.java).setup()
+        try {
+            val act1 = controller1.get()
+            val act2 = controller2.get()
+
+            val view1 = host.createHostView(act1, 11, null).apply {
+                onWidgetClickedListener = {}
+            }
+            val parent1 = android.widget.FrameLayout(act1)
+            parent1.addView(view1)
+
+            val view2 = host.createHostView(act2, 22, null)
+            assertThat(host.cacheSize()).isEqualTo(2)
+
+            // Releasing act1 cleans up widget 11 only, leaving widget 22 intact for act2
+            host.releaseViewsForContext(act1)
+            assertThat(host.getHostView(11)).isNull()
+            assertThat(view1.parent).isNull()
+            assertThat(view1.onWidgetClickedListener).isNull()
+            assertThat(host.getHostView(22)).isSameInstanceAs(view2)
+
+            // Releasing act2 empties cache
+            host.releaseViewsForContext(act2)
+            assertThat(host.cacheSize()).isEqualTo(0)
+        } finally {
+            controller1.pause().stop().destroy()
+            controller2.pause().stop().destroy()
+        }
     }
 
     // --- AndroidWidgetHostGateway Tests ---

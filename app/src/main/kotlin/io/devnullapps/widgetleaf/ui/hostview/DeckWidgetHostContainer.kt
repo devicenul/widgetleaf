@@ -6,7 +6,10 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import io.devnullapps.widgetleaf.domain.model.PlacedWidget
 
@@ -48,93 +51,99 @@ fun DeckWidgetHostContainer(
     onErrorRemoveOrReload: ((Int) -> Unit)? = null,
     onWidgetClicked: ((Int) -> Unit)? = null
 ) {
-    AndroidView<FrameLayout>(
-        modifier = modifier.fillMaxSize(),
-        factory = { ctx ->
-            val container = FrameLayout(ctx).apply {
-                setPadding(0, 0, 0, 0)
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-            }
-            val hostView = createHostView(ctx).apply {
-                (parent as? ViewGroup)?.removeView(this)
-                setPadding(0, 0, 0, 0)
-                layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-                this.interactionMode = if (isEditing) {
-                    DeckAppWidgetHostView.HostInteractionMode.EDIT_MODE
-                } else {
-                    DeckAppWidgetHostView.HostInteractionMode.INTERACTIVE
-                }
-                onEnterEditMode?.let { listener ->
-                    onEnterEditModeListener = { id, _, _ -> listener(id) }
-                }
-                onHorizontalPageScroll?.let { listener ->
-                    onHorizontalPageScrollListener = { delta -> listener(delta) }
-                }
-                onErrorRemoveOrReload?.let { listener ->
-                    onErrorRemoveOrReloadListener = { id -> listener(id) }
-                }
-                onWidgetClicked?.let { listener ->
-                    onWidgetClickedListener = { id -> listener(id) }
-                    onWidgetInteractionListener = { id -> listener(id) }
-                }
-            }
-            container.addView(hostView)
-            container
-        },
-        onReset = { container ->
-            detachHostViewIfOwned(container)
-        },
-        onRelease = { container ->
-            detachHostViewIfOwned(container)
-        },
-        update = { container ->
-            var hostView = (0 until container.childCount)
-                .map { container.getChildAt(it) }
-                .filterIsInstance<DeckAppWidgetHostView>()
-                .firstOrNull()
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    val hostEnvironment = HostViewEnvironment.from(context, configuration)
 
-            if (hostView == null) {
-                val view = createHostView(container.context).apply {
+    key(placedWidget.appWidgetId, hostEnvironment) {
+        AndroidView<FrameLayout>(
+            modifier = modifier.fillMaxSize(),
+            factory = { ctx ->
+                val container = FrameLayout(ctx).apply {
+                    setPadding(0, 0, 0, 0)
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                }
+                val hostView = createHostView(ctx).apply {
+                    (parent as? ViewGroup)?.removeView(this)
                     setPadding(0, 0, 0, 0)
                     layoutParams = FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
+                    this.interactionMode = if (isEditing) {
+                        DeckAppWidgetHostView.HostInteractionMode.EDIT_MODE
+                    } else {
+                        DeckAppWidgetHostView.HostInteractionMode.INTERACTIVE
+                    }
+                    onEnterEditMode?.let { listener ->
+                        onEnterEditModeListener = { id, _, _ -> listener(id) }
+                    }
+                    onHorizontalPageScroll?.let { listener ->
+                        onHorizontalPageScrollListener = { delta -> listener(delta) }
+                    }
+                    onErrorRemoveOrReload?.let { listener ->
+                        onErrorRemoveOrReloadListener = { id -> listener(id) }
+                    }
+                    onWidgetClicked?.let { listener ->
+                        onWidgetClickedListener = { id -> listener(id) }
+                        onWidgetInteractionListener = { id -> listener(id) }
+                    }
                 }
-                if (view.parent == null) {
-                    container.addView(view)
-                    hostView = view
-                } else if (view.parent === container) {
-                    hostView = view
-                }
-            }
+                container.addView(hostView)
+                container
+            },
+            onReset = { container ->
+                detachHostViewIfOwned(container)
+            },
+            onRelease = { container ->
+                detachHostViewIfOwned(container)
+            },
+            update = { container ->
+                var hostView = (0 until container.childCount)
+                    .map { container.getChildAt(it) }
+                    .filterIsInstance<DeckAppWidgetHostView>()
+                    .firstOrNull()
 
-            hostView?.apply {
-                interactionMode = if (isEditing) {
-                    DeckAppWidgetHostView.HostInteractionMode.EDIT_MODE
-                } else {
-                    DeckAppWidgetHostView.HostInteractionMode.INTERACTIVE
+                if (hostView == null) {
+                    val view = createHostView(container.context).apply {
+                        setPadding(0, 0, 0, 0)
+                        layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    }
+                    if (view.parent == null) {
+                        container.addView(view)
+                        hostView = view
+                    } else if (view.parent === container) {
+                        hostView = view
+                    }
                 }
-                onEnterEditMode?.let { listener ->
-                    onEnterEditModeListener = { id, _, _ -> listener(id) }
-                }
-                onHorizontalPageScroll?.let { listener ->
-                    onHorizontalPageScrollListener = { delta -> listener(delta) }
-                }
-                onErrorRemoveOrReload?.let { listener ->
-                    onErrorRemoveOrReloadListener = { id -> listener(id) }
-                }
-                onWidgetClicked?.let { listener ->
-                    onWidgetClickedListener = { id -> listener(id) }
-                    onWidgetInteractionListener = { id -> listener(id) }
+
+                hostView?.apply {
+                    interactionMode = if (isEditing) {
+                        DeckAppWidgetHostView.HostInteractionMode.EDIT_MODE
+                    } else {
+                        DeckAppWidgetHostView.HostInteractionMode.INTERACTIVE
+                    }
+                    onEnterEditMode?.let { listener ->
+                        onEnterEditModeListener = { id, _, _ -> listener(id) }
+                    }
+                    onHorizontalPageScroll?.let { listener ->
+                        onHorizontalPageScrollListener = { delta -> listener(delta) }
+                    }
+                    onErrorRemoveOrReload?.let { listener ->
+                        onErrorRemoveOrReloadListener = { id -> listener(id) }
+                    }
+                    onWidgetClicked?.let { listener ->
+                        onWidgetClickedListener = { id -> listener(id) }
+                        onWidgetInteractionListener = { id -> listener(id) }
+                    }
                 }
             }
-        }
-    )
+        )
+    }
 }
