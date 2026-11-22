@@ -606,6 +606,9 @@ class DeckViewModelTest {
     fun onOverlayShown_syncsSizesForAllWidgets() = runTest {
         val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
         val w2 = createWidget(id = 2, pageIndex = 0, cellX = 2, cellY = 0, spanX = 3, spanY = 2)
+        fakeGateway.allocatedIds = listOf(1, 2)
+        fakeGateway.installedProviders.add(w1.providerPackage to w1.providerClass)
+        fakeGateway.installedProviders.add(w2.providerPackage to w2.providerClass)
         fakeRepository.setWidgets(listOf(w1, w2))
 
         fakeGateway.updateSizesCalls.clear()
@@ -1742,6 +1745,126 @@ class DeckViewModelTest {
         assertTrue(fakeRepository.settings.useDynamicColor)
     }
 
+    @Test
+    fun onOverlayShown_afterGridShrink_refreshesRawMetadataWithoutPersistingReflowedPositions() = runTest(testDispatcher) {
+        // Raw desktop layout on 8x6: w1 at (0,0,2x2), w2 at (5,0,3x2) (out-of-bounds in 4x4!)
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 5, cellY = 0, spanX = 3, spanY = 2)
+        fakeGateway.allocatedIds = listOf(1, 2)
+        fakeGateway.installedProviders.add(w1.providerPackage to w1.providerClass)
+        fakeGateway.installedProviders.add(w2.providerPackage to w2.providerClass)
+        fakeRepository.setWidgets(listOf(w1, w2))
+        fakeRepository.setPages(listOf(DeckPage(0)))
+        fakeRepository.updateLastGoodGridSize(8, 6)
+
+        fakeGateway.catalogToReturn = listOf(
+            WidgetCatalogItem(
+                providerPackage = w2.providerPackage,
+                providerClass = w2.providerClass,
+                appName = "App2",
+                widgetLabel = "Widget2",
+                defaultSpanX = 3,
+                defaultSpanY = 2,
+                minSpanX = 2,
+                minSpanY = 1,
+                maxSpanX = 6,
+                maxSpanY = 4,
+                resizeMode = PlacedWidget.RESIZE_BOTH,
+                isReconfigurable = true
+            )
+        )
+
+        // Open directly in a small 4x4 window (cold start before flows settled or after shrink)
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 4, rows = 4))
+        viewModel.onOverlayShown()
+
+        // Displayed state must be reflowed to fit 4x4
+        val displayedW2 = viewModel.uiState.value.widgets.first { it.appWidgetId == 2 }
+        assertTrue(displayedW2.cellX + displayedW2.spanX <= 4)
+        assertTrue(displayedW2.cellY + displayedW2.spanY <= 4)
+
+        // Raw persisted state must keep (cellX=5, cellY=0, spanX=3, spanY=2) AND gain refreshed metadata!
+        val rawW2 = fakeRepository.widgets.first { it.appWidgetId == 2 }
+        assertEquals(0, rawW2.pageIndex)
+        assertEquals(5, rawW2.cellX)
+        assertEquals(0, rawW2.cellY)
+        assertEquals(3, rawW2.spanX)
+        assertEquals(2, rawW2.spanY)
+        assertEquals(6, rawW2.maxSpanX)
+        assertEquals(4, rawW2.maxSpanY)
+        assertTrue(rawW2.isReconfigurable)
+    }
+
+    @Test
+    fun coldStartInSmallWindow_restoresPersistedLastGoodBaselineFromDataStore() = runTest(testDispatcher) {
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 5, cellY = 0, spanX = 2, spanY = 2)
+        fakeGateway.allocatedIds = listOf(1, 2)
+        fakeGateway.installedProviders.add(w1.providerPackage to w1.providerClass)
+        fakeGateway.installedProviders.add(w2.providerPackage to w2.providerClass)
+        fakeRepository.setWidgets(listOf(w1, w2))
+        fakeRepository.setPages(listOf(DeckPage(0)))
+        fakeRepository.updateLastGoodGridSize(8, 6)
+
+        // Cold start directly in a 4x4 window
+        val coldVm = DeckViewModel(fakeRepository, fakeGateway)
+        coldVm.updateGridProfile(DesktopGridProfile(columns = 4, rows = 4))
+        coldVm.onOverlayShown()
+
+        // Persisted baseline must remain 8x6 (never overwritten with 4x4)
+        assertEquals(Pair(8, 6), fakeRepository.lastGoodGridSize)
+        val effective = coldVm.getEffectiveGridProfile(coldVm.uiState.value.gridProfile)
+        assertEquals(8, effective.columns)
+        assertEquals(6, effective.rows)
+
+        // Adding a new widget on cold start in 4x4 evaluates on 8x6 baseline without colliding with raw w2
+        val newItem = createCatalogItem("com.cold", "ColdWidget", 2, 2)
+        coldVm.addWidgetAutoPlace(newItem)
+        val rawNew = fakeRepository.widgets.first { it.providerPackage == "com.cold" }
+        val rawW2 = fakeRepository.widgets.first { it.appWidgetId == 2 }
+        assertFalse(rawNew.bounds.intersects(rawW2.bounds))
+    }
+
+    @Test
+    fun dragAndResizePreview_onShrunkGrid_matchesCommitResult() = runTest(testDispatcher) {
+        // 8x6 raw layout: w1 at (0,0,2x2), w2 at (5,0,2x2) (reflowed to (0,2,2x2) on 4x4), w3 at (2,0,2x2)
+        val w1 = createWidget(id = 1, pageIndex = 0, cellX = 0, cellY = 0, spanX = 2, spanY = 2)
+        val w2 = createWidget(id = 2, pageIndex = 0, cellX = 5, cellY = 0, spanX = 2, spanY = 2)
+        val w3 = createWidget(id = 3, pageIndex = 0, cellX = 2, cellY = 0, spanX = 2, spanY = 2)
+        fakeRepository.setWidgets(listOf(w1, w2, w3))
+        fakeRepository.setPages(listOf(DeckPage(0)))
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 8, rows = 6))
+
+        // Shrink to 4x4
+        viewModel.updateGridProfile(DesktopGridProfile(columns = 4, rows = 4))
+
+        // Drag w1 onto (2,0) (occupied by w3)
+        viewModel.startWidgetDrag(1)
+        viewModel.onWidgetHoverCellChanged(1, 2, 0)
+        advanceTimeBy(300L)
+
+        val previewAfterHover = viewModel.uiState.value.previewWidgets
+        assertNotNull(previewAfterHover)
+        // All preview widgets must fit inside 4x4 displayed grid!
+        assertTrue(previewAfterHover!!.all { it.cellX + it.spanX <= 4 && it.cellY + it.spanY <= 4 })
+
+        // Commit must produce the EXACT same displayed widgets as the preview
+        viewModel.commitWidgetDrag(1, 2, 0)
+        assertEquals(previewAfterHover.sortedBy { it.appWidgetId }, viewModel.uiState.value.widgets.sortedBy { it.appWidgetId })
+
+        // Now test resize preview vs commit on shrunk 4x4 grid
+        viewModel.startWidgetResize(1)
+        viewModel.onWidgetResizeBoundsChanged(1, cellX = 0, cellY = 0, spanX = 4, spanY = 2)
+        advanceTimeBy(300L)
+
+        val resizePreview = viewModel.uiState.value.previewWidgets
+        assertNotNull(resizePreview)
+        assertTrue(resizePreview!!.all { it.cellX + it.spanX <= 4 && it.cellY + it.spanY <= 4 })
+
+        viewModel.commitWidgetResize(1, cellX = 0, cellY = 0, spanX = 4, spanY = 2)
+        assertEquals(resizePreview.sortedBy { it.appWidgetId }, viewModel.uiState.value.widgets.sortedBy { it.appWidgetId })
+    }
+
     private fun createCatalogItem(pkg: String, label: String, spanX: Int, spanY: Int) = WidgetCatalogItem(
         providerPackage = pkg,
         providerClass = "$pkg.Widget",
@@ -1762,16 +1885,20 @@ internal class FakeWidgetDeckRepository(
         private val _pagesFlow = MutableStateFlow(initialPages)
         private val _widgetsFlow = MutableStateFlow(initialWidgets)
         private val _settingsFlow = MutableStateFlow(initialSettings)
+        private val _lastGoodGridSizeFlow = MutableStateFlow<Pair<Int, Int>?>(null)
 
         override val pagesFlow: Flow<List<DeckPage>> = _pagesFlow
         override val widgetsFlow: Flow<List<PlacedWidget>> = _widgetsFlow
         override val settingsFlow: Flow<OverlaySettings> = _settingsFlow
+        override val lastGoodGridSizeFlow: Flow<Pair<Int, Int>?> = _lastGoodGridSizeFlow
 
         val pages: List<DeckPage> get() = _pagesFlow.value
         val widgets: List<PlacedWidget> get() = _widgetsFlow.value
         var settings: OverlaySettings
             get() = _settingsFlow.value
             set(value) { _settingsFlow.value = value }
+        val lastGoodGridSize: Pair<Int, Int>?
+            get() = _lastGoodGridSizeFlow.value
 
         val updatedPageLabels = mutableMapOf<Int, String?>()
         val removedWidgetIds = mutableListOf<Int>()
@@ -1832,6 +1959,12 @@ internal class FakeWidgetDeckRepository(
 
         override suspend fun updateSettings(transform: (OverlaySettings) -> OverlaySettings) {
             _settingsFlow.value = transform(_settingsFlow.value)
+        }
+
+        override suspend fun updateLastGoodGridSize(columns: Int, rows: Int) {
+            if (columns > 0 && rows > 0) {
+                _lastGoodGridSizeFlow.value = Pair(columns, rows)
+            }
         }
     }
 

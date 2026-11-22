@@ -38,6 +38,8 @@ class PreferencesDataStore(
         val KEY_HOTKEY_SHIFT = booleanPreferencesKey("hotkey_shift")
         val KEY_HOTKEY_META = booleanPreferencesKey("hotkey_meta")
         val KEY_USE_CENTERED_BENTO_CANVAS = booleanPreferencesKey("use_centered_bento_canvas")
+        val KEY_LAST_GOOD_COLUMNS = intPreferencesKey("last_good_columns")
+        val KEY_LAST_GOOD_ROWS = intPreferencesKey("last_good_rows")
 
         // Legacy keys migrated and removed gracefully
         private val KEY_LEGACY_PIN_TASKBAR_LEFT = booleanPreferencesKey("pin_taskbar_left")
@@ -91,6 +93,28 @@ class PreferencesDataStore(
         .map { preferences ->
             toOverlaySettings(preferences)
         }
+
+    val lastGoodGridSizeFlow: Flow<Pair<Int, Int>?> = dataStore.data
+        .catch { exception ->
+            if (exception is IOException) {
+                emit(emptyPreferences())
+            } else {
+                throw exception
+            }
+        }
+        .map { preferences ->
+            val columns = preferences[KEY_LAST_GOOD_COLUMNS] ?: 0
+            val rows = preferences[KEY_LAST_GOOD_ROWS] ?: 0
+            if (columns > 0 && rows > 0) Pair(columns, rows) else null
+        }
+
+    suspend fun updateLastGoodGridSize(columns: Int, rows: Int) {
+        if (columns <= 0 || rows <= 0) return
+        dataStore.edit { preferences ->
+            preferences[KEY_LAST_GOOD_COLUMNS] = columns
+            preferences[KEY_LAST_GOOD_ROWS] = rows
+        }
+    }
 
     suspend fun updateSettings(transform: (OverlaySettings) -> OverlaySettings) {
         dataStore.edit { preferences ->

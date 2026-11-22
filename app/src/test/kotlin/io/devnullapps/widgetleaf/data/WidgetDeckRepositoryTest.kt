@@ -271,6 +271,17 @@ class WidgetDeckRepositoryTest {
     }
 
     @Test
+    fun lastGoodGridSize_persistsAcrossReadsAndIgnoresInvalidSizes() = runTest {
+        assertThat(repository.lastGoodGridSizeFlow.first()).isNull()
+
+        repository.updateLastGoodGridSize(0, 6)
+        assertThat(repository.lastGoodGridSizeFlow.first()).isNull()
+
+        repository.updateLastGoodGridSize(8, 6)
+        assertThat(repository.lastGoodGridSizeFlow.first()).isEqualTo(Pair(8, 6))
+    }
+
+    @Test
     fun replaceDeckState_overwritesPagesAndWidgets() = runTest {
         // Initial setup
         repository.upsertWidget(sampleWidget(id = 1, pageIndex = 0))

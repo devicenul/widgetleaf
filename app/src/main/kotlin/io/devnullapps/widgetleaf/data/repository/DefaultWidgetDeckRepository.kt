@@ -46,6 +46,8 @@ class DefaultWidgetDeckRepository(
 
     override val settingsFlow: Flow<OverlaySettings> = preferencesDataStore.settingsFlow
 
+    override val lastGoodGridSizeFlow: Flow<Pair<Int, Int>?> = preferencesDataStore.lastGoodGridSizeFlow
+
     override suspend fun getSnapshot(): Pair<List<DeckPage>, List<PlacedWidget>> {
         val pageEntities = deckPageDao.getAll()
         val widgetEntities = widgetPlacementDao.getAll()
@@ -101,6 +103,10 @@ class DefaultWidgetDeckRepository(
 
     override suspend fun updateSettings(transform: (OverlaySettings) -> OverlaySettings) {
         preferencesDataStore.updateSettings(transform)
+    }
+
+    override suspend fun updateLastGoodGridSize(columns: Int, rows: Int) {
+        preferencesDataStore.updateLastGoodGridSize(columns, rows)
     }
 
     private suspend fun pruneEmptyPagesAndReindexInternal() {

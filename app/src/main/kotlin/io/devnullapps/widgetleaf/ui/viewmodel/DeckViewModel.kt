@@ -17,6 +17,7 @@ import io.devnullapps.widgetleaf.domain.usecase.EdgePageDragTransferUseCase
 import io.devnullapps.widgetleaf.domain.usecase.EdgeTransferResult
 import io.devnullapps.widgetleaf.domain.usecase.GridCollisionResolver
 import io.devnullapps.widgetleaf.domain.usecase.ReconcileOrphanWidgetsUseCase
+import io.devnullapps.widgetleaf.platform.DesktopGridProfileResolver
 import io.devnullapps.widgetleaf.platform.WidgetHostGateway
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -51,7 +52,9 @@ class DeckViewModel(
     private var dragStartPageIndex: Int? = null
     private var dragDebounceJob: Job? = null
     private var draggingWidgetStartCell: Pair<Int, Int>? = null
+    private var draggingWidgetDisplayedStartCell: Pair<Int, Int>? = null
     private var resizingWidgetStartBounds: GridBounds? = null
+    private var resizingWidgetDisplayedStartBounds: GridBounds? = null
     private var dragSessionToken: Long = 0L
 
     private var isFirstWidgetsEmission: Boolean = true
@@ -60,15 +63,80 @@ class DeckViewModel(
     private var rawPersistedWidgets: List<PlacedWidget> = emptyList()
     private var rawPersistedPages: List<DeckPage> = listOf(DeckPage(pageIndex = 0, customLabel = null))
     private var lastGoodProfile: DesktopGridProfile? = null
+    private var persistedLastGoodGridSize: Pair<Int, Int>? = null
     private val settingsUpdateMutex = Mutex()
     private var pendingSettingsMutations: Int = 0
 
+    private data class ResolvedCascadeState(
+        val rawWidgets: List<PlacedWidget>,
+        val rawPages: List<DeckPage>,
+        val displayedPages: List<DeckPage>,
+        val displayedWidgets: List<PlacedWidget>,
+        val movedWidgetIds: Set<Int>
+    )
+
+    private fun minimumRawBoundingSize(widgets: List<PlacedWidget>): Pair<Int, Int> {
+        if (widgets.isEmpty()) return Pair(0, 0)
+        val maxCol = widgets.maxOf { (it.cellX + it.spanX).coerceAtLeast(1) }
+        val maxRow = widgets.maxOf { (it.cellY + it.spanY).coerceAtLeast(1) }
+        return Pair(maxCol, maxRow)
+    }
+
+    private fun buildBaselineProfile(
+        columns: Int,
+        rows: Int,
+        reference: DesktopGridProfile
+    ): DesktopGridProfile {
+        return reference.copy(
+            columns = maxOf(columns, reference.columns),
+            rows = maxOf(rows, reference.rows),
+            cellWidthDp = maxOf(reference.cellWidthDp, DesktopGridProfileResolver.DEFAULT_CELL_WIDTH_DP),
+            cellHeightDp = maxOf(reference.cellHeightDp, DesktopGridProfileResolver.DEFAULT_CELL_HEIGHT_DP),
+            gutterDp = maxOf(reference.gutterDp, DesktopGridProfileResolver.DEFAULT_GUTTER_DP)
+        )
+    }
+
     internal fun getEffectiveGridProfile(currentProfile: DesktopGridProfile): DesktopGridProfile {
-        val good = lastGoodProfile ?: return currentProfile
-        return if (good.columns >= currentProfile.columns && good.rows >= currentProfile.rows) {
-            good
-        } else {
+        val good = lastGoodProfile
+        val saved = persistedLastGoodGridSize
+        val rawNeedsReflow = widgetsNeedReflow(rawPersistedWidgets, currentProfile)
+        val rawBounds = minimumRawBoundingSize(rawPersistedWidgets)
+
+        var bestCols = currentProfile.columns
+        var bestRows = currentProfile.rows
+        var cellW = currentProfile.cellWidthDp
+        var cellH = currentProfile.cellHeightDp
+        var gutter = currentProfile.gutterDp
+
+        if (good != null && ((good.columns >= currentProfile.columns && good.rows >= currentProfile.rows) || rawNeedsReflow)) {
+            bestCols = maxOf(bestCols, good.columns)
+            bestRows = maxOf(bestRows, good.rows)
+            cellW = maxOf(cellW, good.cellWidthDp)
+            cellH = maxOf(cellH, good.cellHeightDp)
+            gutter = maxOf(gutter, good.gutterDp)
+        }
+        if (saved != null && ((saved.first >= currentProfile.columns && saved.second >= currentProfile.rows) || rawNeedsReflow)) {
+            bestCols = maxOf(bestCols, saved.first)
+            bestRows = maxOf(bestRows, saved.second)
+            cellW = maxOf(cellW, DesktopGridProfileResolver.DEFAULT_CELL_WIDTH_DP)
+            cellH = maxOf(cellH, DesktopGridProfileResolver.DEFAULT_CELL_HEIGHT_DP)
+            gutter = maxOf(gutter, DesktopGridProfileResolver.DEFAULT_GUTTER_DP)
+        }
+        if (rawNeedsReflow) {
+            bestCols = maxOf(bestCols, rawBounds.first)
+            bestRows = maxOf(bestRows, rawBounds.second)
+        }
+
+        return if (bestCols == currentProfile.columns && bestRows == currentProfile.rows) {
             currentProfile
+        } else {
+            currentProfile.copy(
+                columns = bestCols,
+                rows = bestRows,
+                cellWidthDp = cellW,
+                cellHeightDp = cellH,
+                gutterDp = gutter
+            )
         }
     }
 
@@ -173,6 +241,22 @@ class DeckViewModel(
                 }
             }
         }
+
+        viewModelScope.launch {
+            repository.lastGoodGridSizeFlow.collect { savedSize ->
+                persistedLastGoodGridSize = savedSize
+                if (savedSize != null) {
+                    val current = _uiState.value.gridProfile
+                    val currentGood = lastGoodProfile
+                    if (currentGood == null ||
+                        (savedSize.first >= currentGood.columns && savedSize.second >= currentGood.rows) ||
+                        widgetsNeedReflow(rawPersistedWidgets, current)
+                    ) {
+                        lastGoodProfile = buildBaselineProfile(savedSize.first, savedSize.second, current)
+                    }
+                }
+            }
+        }
     }
 
     // --- Overlay Lifecycle & Startup ---
@@ -181,33 +265,44 @@ class DeckViewModel(
         cancelWidgetDrag()
         viewModelScope.launch {
             reconcileOrphanWidgetsUseCase()
-            val (snapshotPages, _) = repository.getSnapshot()
+            val (snapshotPages, snapshotWidgets) = repository.getSnapshot()
             val loadedSettings = repository.settingsFlow.first()
+            val savedLastGoodSize = repository.lastGoodGridSizeFlow.first()
+            if (savedLastGoodSize != null) {
+                persistedLastGoodGridSize = savedLastGoodSize
+            }
+
             val effectiveSettings = if (pendingSettingsMutations > 0) {
                 _uiState.value.settings
             } else {
                 loadedSettings
             }
-            val safePages = if (snapshotPages.isNotEmpty()) snapshotPages else _uiState.value.pages
+            val rawPages = if (snapshotPages.isNotEmpty()) {
+                snapshotPages
+            } else {
+                rawPersistedPages.ifEmpty { listOf(DeckPage(pageIndex = 0, customLabel = null)) }
+            }
+            val rawWidgets = snapshotWidgets
             val profile = _uiState.value.gridProfile
-            val currentWidgets = _uiState.value.widgets
-            val (displayedPages, displayedWidgets) = deriveDisplayedState(
-                currentWidgets,
-                safePages,
-                profile
-            )
+            val fitsRaw = !widgetsNeedReflow(rawWidgets, profile)
 
-            val targetPage = targetPageOverride?.coerceIn(0, (displayedPages.size - 1).coerceAtLeast(0))
-                ?: if (effectiveSettings.openOnPageOne) {
-                    0
-                } else {
-                    effectiveSettings.lastViewedPageIndex.coerceIn(0, (displayedPages.size - 1).coerceAtLeast(0))
+            if (fitsRaw) {
+                val saved = persistedLastGoodGridSize
+                if (rawWidgets.isNotEmpty() && (saved == null || (profile.columns >= saved.first && profile.rows >= saved.second && Pair(profile.columns, profile.rows) != saved))) {
+                    persistedLastGoodGridSize = Pair(profile.columns, profile.rows)
+                    repository.updateLastGoodGridSize(profile.columns, profile.rows)
                 }
+            }
+            val effectiveProfile = getEffectiveGridProfile(profile)
+            if (lastGoodProfile == null || fitsRaw) {
+                lastGoodProfile = effectiveProfile
+            }
 
-            val catalog = widgetHostGateway.getInstalledCatalog(profile)
-            // Refresh stored widget limits from installed provider info where available
+            // Refresh metadata strictly against RAW persisted widgets using the baseline profile,
+            // never writing display-reflowed positions or clamped spans back to Room (INV-14).
+            val catalog = widgetHostGateway.getInstalledCatalog(effectiveProfile)
             val catalogMap = catalog.associateBy { it.providerPackage to it.providerClass }
-            val refreshedWidgets = displayedWidgets.map { w ->
+            val refreshedRawWidgets = rawWidgets.map { w ->
                 val provider = catalogMap[w.providerPackage to w.providerClass]
                 if (provider != null) {
                     w.copy(
@@ -223,18 +318,34 @@ class DeckViewModel(
                     w
                 }
             }
-            if (refreshedWidgets != displayedWidgets) {
-                repository.upsertWidgets(refreshedWidgets)
+            if (refreshedRawWidgets != rawWidgets) {
+                repository.upsertWidgets(refreshedRawWidgets)
             }
 
-            for (w in refreshedWidgets) {
+            rawPersistedWidgets = refreshedRawWidgets
+            rawPersistedPages = rawPages
+
+            val (displayedPages, displayedWidgets) = deriveDisplayedState(
+                refreshedRawWidgets,
+                rawPages,
+                profile
+            )
+
+            val targetPage = targetPageOverride?.coerceIn(0, (displayedPages.size - 1).coerceAtLeast(0))
+                ?: if (effectiveSettings.openOnPageOne) {
+                    0
+                } else {
+                    effectiveSettings.lastViewedPageIndex.coerceIn(0, (displayedPages.size - 1).coerceAtLeast(0))
+                }
+
+            for (w in displayedWidgets) {
                 syncWidgetSizes(w, profile)
             }
             lastSyncedProfile = profile
 
             _uiState.update { current ->
                 current.copy(
-                    widgets = refreshedWidgets,
+                    widgets = displayedWidgets,
                     pages = displayedPages,
                     settings = if (pendingSettingsMutations > 0) current.settings else loadedSettings,
                     isSettingsLoaded = true,
@@ -712,11 +823,19 @@ class DeckViewModel(
         val baseWidgets = rawPersistedWidgets.ifEmpty { _uiState.value.widgets }
         val basePages = rawPersistedPages.ifEmpty { _uiState.value.pages }
         val dragged = baseWidgets.find { it.appWidgetId == appWidgetId }
+        val displayedDragged = _uiState.value.widgets.find { it.appWidgetId == appWidgetId }
         dragSnapshotWidgets = baseWidgets
         dragSnapshotPages = basePages
         dragSnapshotPageCount = basePages.size
-        dragStartPageIndex = dragged?.pageIndex ?: _uiState.value.activePageIndex
+        dragStartPageIndex = displayedDragged?.pageIndex ?: dragged?.pageIndex ?: _uiState.value.activePageIndex
         draggingWidgetStartCell = if (dragged != null) Pair(dragged.cellX, dragged.cellY) else null
+        draggingWidgetDisplayedStartCell = if (displayedDragged != null) {
+            Pair(displayedDragged.cellX, displayedDragged.cellY)
+        } else {
+            draggingWidgetStartCell
+        }
+        resizingWidgetStartBounds = null
+        resizingWidgetDisplayedStartBounds = null
 
         _uiState.update {
             it.copy(
@@ -738,14 +857,15 @@ class DeckViewModel(
         val baseWidgets = rawPersistedWidgets.ifEmpty { _uiState.value.widgets }
         val basePages = rawPersistedPages.ifEmpty { _uiState.value.pages }
         val target = baseWidgets.find { it.appWidgetId == appWidgetId }
+        val displayedTarget = _uiState.value.widgets.find { it.appWidgetId == appWidgetId }
         dragSnapshotWidgets = baseWidgets
         dragSnapshotPages = basePages
         dragSnapshotPageCount = basePages.size
-        dragStartPageIndex = target?.pageIndex ?: _uiState.value.activePageIndex
+        dragStartPageIndex = displayedTarget?.pageIndex ?: target?.pageIndex ?: _uiState.value.activePageIndex
         draggingWidgetStartCell = null
-        resizingWidgetStartBounds = if (target != null) {
-            GridBounds(target.cellX, target.cellY, target.spanX, target.spanY)
-        } else null
+        draggingWidgetDisplayedStartCell = null
+        resizingWidgetStartBounds = target?.bounds
+        resizingWidgetDisplayedStartBounds = displayedTarget?.bounds ?: target?.bounds
 
         _uiState.update {
             it.copy(
@@ -758,6 +878,69 @@ class DeckViewModel(
                 hoveredCell = null
             )
         }
+    }
+
+    private fun resolveCascadeForDisplayAndRaw(
+        appWidgetId: Int,
+        targetWidget: PlacedWidget,
+        snapshot: List<PlacedWidget>,
+        basePages: List<DeckPage>,
+        snapshotPageCount: Int,
+        activePage: Int,
+        currentProfile: DesktopGridProfile,
+        effectiveProfile: DesktopGridProfile,
+        baselineDisplayedWidgets: List<PlacedWidget>,
+        pruneEmpty: Boolean
+    ): ResolvedCascadeState? {
+        val result = cascadeDisplacementResolver.resolve(
+            dragged = targetWidget,
+            allWidgets = snapshot,
+            columns = effectiveProfile.columns,
+            rows = effectiveProfile.rows,
+            pageCount = maxOf(snapshotPageCount, activePage + 1)
+        ) ?: return null
+
+        val (rawPages, rawWidgets) = if (pruneEmpty) {
+            EdgePageDragTransferUseCase.pruneAndReindexPages(
+                pages = basePages,
+                widgets = result.widgets
+            )
+        } else {
+            val paddedPages = basePages.toMutableList()
+            val targetPages = maxOf(result.pageCount, activePage + 1)
+            while (paddedPages.size < targetPages) {
+                paddedPages.add(DeckPage(pageIndex = paddedPages.size, customLabel = null))
+            }
+            Pair(paddedPages, result.widgets)
+        }
+
+        val (displayedPages, displayedWidgets) = deriveDisplayedState(
+            widgets = rawWidgets,
+            pages = rawPages,
+            profile = currentProfile
+        )
+
+        val baselineMap = baselineDisplayedWidgets.associateBy { it.appWidgetId }
+        val displayedMovedIds = displayedWidgets.mapNotNull { w ->
+            if (w.appWidgetId == appWidgetId) {
+                null
+            } else {
+                val prev = baselineMap[w.appWidgetId]
+                if (prev != null && (prev.pageIndex != w.pageIndex || prev.cellX != w.cellX || prev.cellY != w.cellY)) {
+                    w.appWidgetId
+                } else {
+                    null
+                }
+            }
+        }.toSet()
+
+        return ResolvedCascadeState(
+            rawWidgets = rawWidgets,
+            rawPages = rawPages,
+            displayedPages = displayedPages,
+            displayedWidgets = displayedWidgets,
+            movedWidgetIds = result.movedWidgetIds + displayedMovedIds
+        )
     }
 
     fun onWidgetResizeBoundsChanged(
@@ -774,11 +957,14 @@ class DeckViewModel(
         }
 
         val snapshot = dragSnapshotWidgets ?: return
+        val basePages = dragSnapshotPages ?: rawPersistedPages.ifEmpty { _uiState.value.pages }
+        val snapshotPageCount = if (dragSnapshotPageCount > 0) dragSnapshotPageCount else basePages.size
         val orig = snapshot.find { it.appWidgetId == appWidgetId } ?: return
-        val profile = _uiState.value.gridProfile
+        val currentProfile = _uiState.value.gridProfile
+        val effectiveProfile = getEffectiveGridProfile(currentProfile)
 
-        val maxAvailableX = if (orig.maxSpanX in 1 until profile.columns) orig.maxSpanX else profile.columns
-        val maxAvailableY = if (orig.maxSpanY in 1 until profile.rows) orig.maxSpanY else profile.rows
+        val maxAvailableX = if (orig.maxSpanX in 1 until effectiveProfile.columns) orig.maxSpanX else effectiveProfile.columns
+        val maxAvailableY = if (orig.maxSpanY in 1 until effectiveProfile.rows) orig.maxSpanY else effectiveProfile.rows
         val minAllowedX = orig.minSpanX.coerceIn(1, maxAvailableX)
         val minAllowedY = orig.minSpanY.coerceIn(1, maxAvailableY)
 
@@ -787,17 +973,22 @@ class DeckViewModel(
 
         val clampedSpanX = allowedSpanX.coerceIn(minAllowedX, maxAvailableX)
         val clampedSpanY = allowedSpanY.coerceIn(minAllowedY, maxAvailableY)
-        val clampedCellX = cellX.coerceIn(0, (profile.columns - clampedSpanX).coerceAtLeast(0))
-        val clampedCellY = cellY.coerceIn(0, (profile.rows - clampedSpanY).coerceAtLeast(0))
+        val clampedCellX = cellX.coerceIn(0, (effectiveProfile.columns - clampedSpanX).coerceAtLeast(0))
+        val clampedCellY = cellY.coerceIn(0, (effectiveProfile.rows - clampedSpanY).coerceAtLeast(0))
 
         val activePage = _uiState.value.activePageIndex
         val startPage = dragStartPageIndex ?: activePage
+        val displayedStart = resizingWidgetDisplayedStartBounds ?: orig.bounds
 
         val isOriginal = activePage == startPage &&
-            clampedCellX == orig.cellX &&
-            clampedCellY == orig.cellY &&
-            clampedSpanX == orig.spanX &&
-            clampedSpanY == orig.spanY
+            ((clampedCellX == orig.cellX &&
+                clampedCellY == orig.cellY &&
+                clampedSpanX == orig.spanX &&
+                clampedSpanY == orig.spanY) ||
+                (cellX == displayedStart.cellX &&
+                    cellY == displayedStart.cellY &&
+                    spanX == displayedStart.spanX &&
+                    spanY == displayedStart.spanY))
 
         if (isOriginal) {
             _uiState.update {
@@ -814,8 +1005,9 @@ class DeckViewModel(
         val hasOverlap = snapshot.any {
             it.appWidgetId != appWidgetId && it.pageIndex == activePage && it.bounds.intersects(targetBounds)
         }
+        val isShrunkGrid = currentProfile.columns < effectiveProfile.columns || currentProfile.rows < effectiveProfile.rows
 
-        if (!hasOverlap) {
+        if (!hasOverlap && !isShrunkGrid) {
             _uiState.update {
                 it.copy(
                     previewWidgets = null,
@@ -827,6 +1019,7 @@ class DeckViewModel(
         }
 
         val sessionToken = dragSessionToken
+        val baselineDisplayed = _uiState.value.widgets
         dragDebounceJob = viewModelScope.launch {
             delay(250L)
             if (dragSessionToken != sessionToken ||
@@ -842,26 +1035,29 @@ class DeckViewModel(
                 spanX = clampedSpanX,
                 spanY = clampedSpanY
             )
-            val pageCount = maxOf(dragSnapshotPageCount, activePage + 1)
-
-            val result = cascadeDisplacementResolver.resolve(
-                dragged = targetWidget,
-                allWidgets = currentSnapshot,
-                columns = profile.columns,
-                rows = profile.rows,
-                pageCount = pageCount
+            val resolved = resolveCascadeForDisplayAndRaw(
+                appWidgetId = appWidgetId,
+                targetWidget = targetWidget,
+                snapshot = currentSnapshot,
+                basePages = basePages,
+                snapshotPageCount = snapshotPageCount,
+                activePage = activePage,
+                currentProfile = currentProfile,
+                effectiveProfile = effectiveProfile,
+                baselineDisplayedWidgets = baselineDisplayed,
+                pruneEmpty = false
             )
 
-            if (result != null) {
+            if (resolved != null) {
                 _uiState.update { current ->
                     if (dragSessionToken != sessionToken ||
                         (current.resizingWidgetId != appWidgetId && current.draggingWidgetId != appWidgetId)) {
                         current
                     } else {
                         current.copy(
-                            previewWidgets = result.widgets,
-                            previewPageCount = maxOf(result.pageCount, current.previewPageCount ?: 0),
-                            displacedWidgetIds = result.movedWidgetIds
+                            previewWidgets = resolved.displayedWidgets,
+                            previewPageCount = maxOf(resolved.displayedPages.size, current.previewPageCount ?: 0),
+                            displacedWidgetIds = resolved.movedWidgetIds
                         )
                     }
                 }
@@ -892,7 +1088,7 @@ class DeckViewModel(
         }
 
         // Re-trigger cascade displacement computation on the newly active page
-        val currentHover = _uiState.value.hoveredCell ?: draggingWidgetStartCell ?: Pair(0, 0)
+        val currentHover = _uiState.value.hoveredCell ?: draggingWidgetDisplayedStartCell ?: draggingWidgetStartCell ?: Pair(0, 0)
         onWidgetHoverCellChanged(draggingId, currentHover.first, currentHover.second)
     }
 
@@ -901,7 +1097,7 @@ class DeckViewModel(
 
         val activePage = _uiState.value.activePageIndex
         val startPage = dragStartPageIndex ?: activePage
-        val startCell = draggingWidgetStartCell
+        val startCell = draggingWidgetDisplayedStartCell ?: draggingWidgetStartCell
 
         if (activePage == startPage && startCell != null && cellX == startCell.first && cellY == startCell.second) {
             // Hovered back on original start cell on original page: revert preview immediately
@@ -921,6 +1117,12 @@ class DeckViewModel(
         }
 
         val sessionToken = dragSessionToken
+        val currentProfile = _uiState.value.gridProfile
+        val effectiveProfile = getEffectiveGridProfile(currentProfile)
+        val basePages = dragSnapshotPages ?: rawPersistedPages.ifEmpty { _uiState.value.pages }
+        val snapshotPageCount = if (dragSnapshotPageCount > 0) dragSnapshotPageCount else basePages.size
+        val baselineDisplayed = _uiState.value.widgets
+
         dragDebounceJob = viewModelScope.launch {
             delay(250L)
             if (dragSessionToken != sessionToken || _uiState.value.draggingWidgetId != appWidgetId) {
@@ -929,33 +1131,36 @@ class DeckViewModel(
 
             val currentSnapshot = dragSnapshotWidgets ?: return@launch
             val orig = currentSnapshot.find { it.appWidgetId == appWidgetId } ?: return@launch
-            val profile = _uiState.value.gridProfile
-            val clampedCellX = cellX.coerceIn(0, (profile.columns - orig.spanX).coerceAtLeast(0))
-            val clampedCellY = cellY.coerceIn(0, (profile.rows - orig.spanY).coerceAtLeast(0))
+            val clampedCellX = cellX.coerceIn(0, (effectiveProfile.columns - orig.spanX).coerceAtLeast(0))
+            val clampedCellY = cellY.coerceIn(0, (effectiveProfile.rows - orig.spanY).coerceAtLeast(0))
             val targetWidget = orig.copy(
                 pageIndex = activePage,
                 cellX = clampedCellX,
                 cellY = clampedCellY
             )
-            val pageCount = maxOf(dragSnapshotPageCount, activePage + 1)
 
-            val result = cascadeDisplacementResolver.resolve(
-                dragged = targetWidget,
-                allWidgets = currentSnapshot,
-                columns = profile.columns,
-                rows = profile.rows,
-                pageCount = pageCount
+            val resolved = resolveCascadeForDisplayAndRaw(
+                appWidgetId = appWidgetId,
+                targetWidget = targetWidget,
+                snapshot = currentSnapshot,
+                basePages = basePages,
+                snapshotPageCount = snapshotPageCount,
+                activePage = activePage,
+                currentProfile = currentProfile,
+                effectiveProfile = effectiveProfile,
+                baselineDisplayedWidgets = baselineDisplayed,
+                pruneEmpty = false
             )
 
-            if (result != null) {
+            if (resolved != null) {
                 _uiState.update { current ->
                     if (dragSessionToken != sessionToken || current.draggingWidgetId != appWidgetId) {
                         current
                     } else {
                         current.copy(
-                            previewWidgets = result.widgets,
-                            previewPageCount = maxOf(result.pageCount, current.previewPageCount ?: 0),
-                            displacedWidgetIds = result.movedWidgetIds
+                            previewWidgets = resolved.displayedWidgets,
+                            previewPageCount = maxOf(resolved.displayedPages.size, current.previewPageCount ?: 0),
+                            displacedWidgetIds = resolved.movedWidgetIds
                         )
                     }
                 }
@@ -970,7 +1175,7 @@ class DeckViewModel(
 
         val baseWidgets = rawPersistedWidgets.ifEmpty { _uiState.value.widgets }
         val snapshot = dragSnapshotWidgets ?: baseWidgets
-        val basePages = rawPersistedPages.ifEmpty { _uiState.value.pages }
+        val basePages = dragSnapshotPages ?: rawPersistedPages.ifEmpty { _uiState.value.pages }
         val snapshotPageCount = if (dragSnapshotPageCount > 0) dragSnapshotPageCount else basePages.size
         val activePage = _uiState.value.activePageIndex
 
@@ -979,7 +1184,9 @@ class DeckViewModel(
         dragSnapshotPageCount = 0
         dragStartPageIndex = null
         draggingWidgetStartCell = null
+        draggingWidgetDisplayedStartCell = null
         resizingWidgetStartBounds = null
+        resizingWidgetDisplayedStartBounds = null
 
         val orig = snapshot.find { it.appWidgetId == appWidgetId }
         if (orig == null) {
@@ -998,31 +1205,31 @@ class DeckViewModel(
             cellY = clampedCellY
         )
 
-        val result = cascadeDisplacementResolver.resolve(
-            dragged = targetWidget,
-            allWidgets = snapshot,
-            columns = effectiveProfile.columns,
-            rows = effectiveProfile.rows,
-            pageCount = maxOf(snapshotPageCount, activePage + 1)
+        val resolved = resolveCascadeForDisplayAndRaw(
+            appWidgetId = appWidgetId,
+            targetWidget = targetWidget,
+            snapshot = snapshot,
+            basePages = basePages,
+            snapshotPageCount = snapshotPageCount,
+            activePage = activePage,
+            currentProfile = currentProfile,
+            effectiveProfile = effectiveProfile,
+            baselineDisplayedWidgets = _uiState.value.widgets,
+            pruneEmpty = true
         )
 
-        if (result != null) {
-            // Prune unused speculative pages and trailing empties atomically
-            val (prunedPages, prunedWidgets) = EdgePageDragTransferUseCase.pruneAndReindexPages(
-                pages = basePages,
-                widgets = result.widgets
-            )
-            rawPersistedWidgets = prunedWidgets
-            rawPersistedPages = prunedPages
-            val finalPageIndex = prunedWidgets.find { it.appWidgetId == appWidgetId }?.pageIndex ?: activePage
-
-            val (displayedPages, displayedWidgets) = deriveDisplayedState(prunedWidgets, prunedPages, currentProfile)
+        if (resolved != null) {
+            rawPersistedWidgets = resolved.rawWidgets
+            rawPersistedPages = resolved.rawPages
+            val finalPageIndex = resolved.displayedWidgets.find { it.appWidgetId == appWidgetId }?.pageIndex
+                ?: resolved.rawWidgets.find { it.appWidgetId == appWidgetId }?.pageIndex
+                ?: activePage
 
             _uiState.update { current ->
                 current.copy(
-                    pages = displayedPages,
-                    widgets = displayedWidgets,
-                    activePageIndex = finalPageIndex.coerceIn(0, displayedPages.lastIndex),
+                    pages = resolved.displayedPages,
+                    widgets = resolved.displayedWidgets,
+                    activePageIndex = finalPageIndex.coerceIn(0, resolved.displayedPages.lastIndex),
                     previewWidgets = null,
                     previewPageCount = null,
                     displacedWidgetIds = emptySet(),
@@ -1033,9 +1240,9 @@ class DeckViewModel(
                 )
             }
             viewModelScope.launch {
-                repository.replaceDeckState(prunedPages, prunedWidgets)
+                repository.replaceDeckState(resolved.rawPages, resolved.rawWidgets)
             }
-            val committed = prunedWidgets.find { it.appWidgetId == appWidgetId }
+            val committed = resolved.displayedWidgets.find { it.appWidgetId == appWidgetId }
             if (committed != null) {
                 syncWidgetSizes(committed, currentProfile)
             }
@@ -1058,7 +1265,9 @@ class DeckViewModel(
         dragSnapshotPageCount = 0
         dragStartPageIndex = null
         draggingWidgetStartCell = null
+        draggingWidgetDisplayedStartCell = null
         resizingWidgetStartBounds = null
+        resizingWidgetDisplayedStartBounds = null
 
         if (snapshotWidgets != null || snapshotPages != null) {
             val basePages = snapshotPages ?: rawPersistedPages.ifEmpty { _uiState.value.pages }
@@ -1176,14 +1385,16 @@ class DeckViewModel(
 
         val baseWidgets = rawPersistedWidgets.ifEmpty { _uiState.value.widgets }
         val snapshot = dragSnapshotWidgets ?: baseWidgets
-        val basePages = rawPersistedPages.ifEmpty { _uiState.value.pages }
+        val basePages = dragSnapshotPages ?: rawPersistedPages.ifEmpty { _uiState.value.pages }
         val snapshotPageCount = if (dragSnapshotPageCount > 0) dragSnapshotPageCount else basePages.size
         dragSnapshotWidgets = null
         dragSnapshotPages = null
         dragSnapshotPageCount = 0
         dragStartPageIndex = null
         draggingWidgetStartCell = null
+        draggingWidgetDisplayedStartCell = null
         resizingWidgetStartBounds = null
+        resizingWidgetDisplayedStartBounds = null
 
         val orig = snapshot.find { it.appWidgetId == appWidgetId }
         if (orig == null) {
@@ -1218,30 +1429,31 @@ class DeckViewModel(
             spanY = clampedSpanY
         )
 
-        val result = cascadeDisplacementResolver.resolve(
-            dragged = target,
-            allWidgets = snapshot,
-            columns = effectiveProfile.columns,
-            rows = effectiveProfile.rows,
-            pageCount = maxOf(snapshotPageCount, activePage + 1)
+        val resolved = resolveCascadeForDisplayAndRaw(
+            appWidgetId = appWidgetId,
+            targetWidget = target,
+            snapshot = snapshot,
+            basePages = basePages,
+            snapshotPageCount = snapshotPageCount,
+            activePage = activePage,
+            currentProfile = currentProfile,
+            effectiveProfile = effectiveProfile,
+            baselineDisplayedWidgets = _uiState.value.widgets,
+            pruneEmpty = true
         )
 
-        if (result != null) {
-            val (prunedPages, prunedWidgets) = EdgePageDragTransferUseCase.pruneAndReindexPages(
-                pages = basePages,
-                widgets = result.widgets
-            )
-            rawPersistedWidgets = prunedWidgets
-            rawPersistedPages = prunedPages
-            val finalPageIndex = prunedWidgets.find { it.appWidgetId == appWidgetId }?.pageIndex ?: activePage
-
-            val (displayedPages, displayedWidgets) = deriveDisplayedState(prunedWidgets, prunedPages, currentProfile)
+        if (resolved != null) {
+            rawPersistedWidgets = resolved.rawWidgets
+            rawPersistedPages = resolved.rawPages
+            val finalPageIndex = resolved.displayedWidgets.find { it.appWidgetId == appWidgetId }?.pageIndex
+                ?: resolved.rawWidgets.find { it.appWidgetId == appWidgetId }?.pageIndex
+                ?: activePage
 
             _uiState.update { current ->
                 current.copy(
-                    pages = displayedPages,
-                    widgets = displayedWidgets,
-                    activePageIndex = finalPageIndex.coerceIn(0, displayedPages.lastIndex),
+                    pages = resolved.displayedPages,
+                    widgets = resolved.displayedWidgets,
+                    activePageIndex = finalPageIndex.coerceIn(0, resolved.displayedPages.lastIndex),
                     previewWidgets = null,
                     previewPageCount = null,
                     displacedWidgetIds = emptySet(),
@@ -1252,9 +1464,9 @@ class DeckViewModel(
                 )
             }
             viewModelScope.launch {
-                repository.replaceDeckState(prunedPages, prunedWidgets)
+                repository.replaceDeckState(resolved.rawPages, resolved.rawWidgets)
             }
-            val committed = prunedWidgets.find { it.appWidgetId == appWidgetId }
+            val committed = resolved.displayedWidgets.find { it.appWidgetId == appWidgetId }
             if (committed != null) {
                 syncWidgetSizes(committed, currentProfile)
             }
@@ -1494,11 +1706,41 @@ class DeckViewModel(
         }
 
         val currentGood = lastGoodProfile
-        val isLargerOrFirst = currentGood == null ||
-            (profile.columns * profile.rows >= currentGood.columns * currentGood.rows)
+        val saved = persistedLastGoodGridSize
         val fitsRaw = !widgetsNeedReflow(rawPersistedWidgets, profile)
-        if (fitsRaw || isLargerOrFirst) {
-            lastGoodProfile = profile
+        if (fitsRaw) {
+            val exceedsSaved = saved == null ||
+                (profile.columns >= saved.first && profile.rows >= saved.second)
+            val exceedsGood = currentGood == null ||
+                (profile.columns >= currentGood.columns && profile.rows >= currentGood.rows)
+            if (exceedsSaved && exceedsGood) {
+                lastGoodProfile = profile
+            } else if (currentGood == null && saved != null) {
+                lastGoodProfile = buildBaselineProfile(saved.first, saved.second, profile)
+            }
+            if (rawPersistedWidgets.isNotEmpty() &&
+                (saved == null || (profile.columns >= saved.first && profile.rows >= saved.second && Pair(profile.columns, profile.rows) != saved))
+            ) {
+                persistedLastGoodGridSize = Pair(profile.columns, profile.rows)
+                viewModelScope.launch {
+                    repository.updateLastGoodGridSize(profile.columns, profile.rows)
+                }
+            }
+        } else {
+            val rawBounds = minimumRawBoundingSize(rawPersistedWidgets)
+            val baselineCols = maxOf(
+                profile.columns,
+                currentGood?.columns ?: 0,
+                saved?.first ?: 0,
+                rawBounds.first
+            )
+            val baselineRows = maxOf(
+                profile.rows,
+                currentGood?.rows ?: 0,
+                saved?.second ?: 0,
+                rawBounds.second
+            )
+            lastGoodProfile = buildBaselineProfile(baselineCols, baselineRows, currentGood ?: profile)
         }
 
         val (displayedPages, displayedWidgets) = deriveDisplayedState(
@@ -1525,6 +1767,14 @@ class DeckViewModel(
         for (w in displayedWidgets) {
             syncWidgetSizes(w, profile)
         }
+    }
+
+    fun resyncWidgetSizes() {
+        val profile = _uiState.value.gridProfile
+        for (w in _uiState.value.widgets) {
+            syncWidgetSizes(w, profile)
+        }
+        lastSyncedProfile = profile
     }
 
     private fun deriveDisplayedState(
@@ -1605,7 +1855,8 @@ class DeckViewModel(
     }
 
     fun refreshCatalog() {
-        val catalog = widgetHostGateway.getInstalledCatalog(_uiState.value.gridProfile)
+        val effectiveProfile = getEffectiveGridProfile(_uiState.value.gridProfile)
+        val catalog = widgetHostGateway.getInstalledCatalog(effectiveProfile)
         _uiState.update { it.copy(catalogItems = catalog) }
     }
 
