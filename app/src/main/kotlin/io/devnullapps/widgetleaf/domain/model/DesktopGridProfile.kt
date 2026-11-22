@@ -10,7 +10,11 @@ data class DesktopGridProfile(
     val topMarginDp: Float = marginDp,
     val maxCanvasWidthDp: Float = 1440f,
     val availableWidthDp: Float = 1440f,
-    val availableHeightDp: Float = 900f
+    val availableHeightDp: Float = 900f,
+    val leftInsetDp: Float = 0f,
+    val topInsetDp: Float = 0f,
+    val rightInsetDp: Float = 0f,
+    val bottomInsetDp: Float = 0f
 ) {
     fun widthDpForSpan(spanX: Int): Float {
         val clamped = spanX.coerceAtLeast(1)

@@ -15,7 +15,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -2126,5 +2130,72 @@ class DeckScreenComposeTest {
         )
         assertThat(animatedBackward.targetContentEnter).isNotEqualTo(EnterTransition.None)
         assertThat(animatedBackward.initialContentExit).isNotEqualTo(ExitTransition.None)
+    }
+
+    @Test
+    fun desktopContextMenu_clampsInsideSmallContainerWithDpMargins() {
+        composeTestRule.setContent {
+            Box(modifier = Modifier.size(320.dp, 480.dp)) {
+                io.devnullapps.widgetleaf.ui.components.DesktopContextMenu(
+                    position = Pair(10_000f, 10_000f),
+                    onOpenWidgetPicker = {},
+                    onOpenOverlaySettings = {},
+                    onDismissRequest = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        val bounds = composeTestRule.onNodeWithTag("desktop_context_menu").getUnclippedBoundsInRoot()
+        assertThat(bounds.left.value).isAtLeast(16f - 0.5f)
+        assertThat(bounds.top.value).isAtLeast(16f - 0.5f)
+        assertThat(bounds.right.value).isAtMost(320f - 16f + 0.5f)
+        assertThat(bounds.bottom.value).isAtMost(480f + 0.5f)
+    }
+
+    @Test
+    fun widgetPickerAndSettingsDialog_fitInsideShortSmallWindowWithoutOverflow() {
+        var openPicker by mutableStateOf(true)
+        var openSettings by mutableStateOf(false)
+
+        composeTestRule.setContent {
+            Box(modifier = Modifier.size(320.dp, 360.dp)) {
+                WidgetDeckOverlayScreen(
+                    uiState = DeckUiState(
+                        isReady = true,
+                        isWidgetPickerOpen = openPicker,
+                        isOverlaySettingsOpen = openSettings
+                    ),
+                    onDismissOverlay = {},
+                    onSelectPage = {},
+                    onPreviousPage = {},
+                    onNextPage = {},
+                    onOpenWidgetPicker = {},
+                    onCloseWidgetPicker = {},
+                    onSearchQueryChange = {},
+                    onAddWidgetAutoPlace = {},
+                    onOpenOverlaySettings = {},
+                    onCloseOverlaySettings = {},
+                    onUpdateSettings = {},
+                    onStartEditPageLabel = {},
+                    onCommitPageLabel = { _, _ -> }
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        val pickerBounds = composeTestRule.onNodeWithTag("widget_picker_sheet").getUnclippedBoundsInRoot()
+        assertThat(pickerBounds.top.value).isAtLeast(0f - 0.5f)
+        assertThat(pickerBounds.bottom.value).isAtMost(360f + 0.5f)
+
+        composeTestRule.runOnIdle {
+            openPicker = false
+            openSettings = true
+        }
+        composeTestRule.waitForIdle()
+
+        val settingsBounds = composeTestRule.onNodeWithTag("overlay_settings_dialog").getUnclippedBoundsInRoot()
+        assertThat(settingsBounds.top.value).isAtLeast(0f - 0.5f)
+        assertThat(settingsBounds.bottom.value).isAtMost(360f + 0.5f)
     }
 }

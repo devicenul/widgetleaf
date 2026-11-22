@@ -11,18 +11,25 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -82,21 +89,31 @@ fun WidgetPickerBottomSheet(
                 )
         )
 
-        // Bottom sheet card
-        GlassHudSurface(
+        // Bottom sheet card (adapts to navigationBars + displayCutout + IME and short windows)
+        BoxWithConstraints(
             modifier = Modifier
-                .widthIn(max = 720.dp)
-                .fillMaxWidth()
-                .heightIn(min = 340.dp, max = 580.dp)
-                .padding(horizontal = 24.dp, vertical = 20.dp)
-                .pointerInput(Unit) {
-                    detectTapGestures { /* Absorb inside taps without merging semantics */ }
-                }
-                .testTag("widget_picker_sheet"),
-            shape = RoundedCornerShape(24.dp),
-            backgroundColor = WidgetLeafTheme.palette.panelSurface,
-            contentPadding = PaddingValues(24.dp)
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.displayCutout))
+                .imePadding(),
+            contentAlignment = Alignment.BottomCenter
         ) {
+            val maxSheetHeight = maxHeight.coerceIn(180.dp, 580.dp)
+            val minSheetHeight = minOf(340.dp, maxSheetHeight)
+
+            GlassHudSurface(
+                modifier = Modifier
+                    .widthIn(max = 720.dp)
+                    .fillMaxWidth()
+                    .heightIn(min = minSheetHeight, max = maxSheetHeight)
+                    .padding(horizontal = 24.dp, vertical = 20.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures { /* Absorb inside taps without merging semantics */ }
+                    }
+                    .testTag("widget_picker_sheet"),
+                shape = RoundedCornerShape(24.dp),
+                backgroundColor = WidgetLeafTheme.palette.panelSurface,
+                contentPadding = PaddingValues(24.dp)
+            ) {
             Column(
                 modifier = Modifier.fillMaxSize()
             ) {
@@ -239,6 +256,7 @@ fun WidgetPickerBottomSheet(
                         }
                     }
                 }
+            }
             }
         }
     }

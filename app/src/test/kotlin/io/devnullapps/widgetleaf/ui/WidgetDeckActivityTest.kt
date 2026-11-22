@@ -1039,4 +1039,70 @@ class WidgetDeckActivityTest {
             tearDownController(controller)
         }
     }
+
+    @Test
+    @Config(qualifiers = "w1366dp-h768dp-mdpi")
+    fun displayQualifier_1366x768_resolves8x5GridSymmetrically() {
+        assertActivityGridProfileMatches(expectedCols = 8, expectedRows = 5, maxWidthDp = 1366f, maxHeightDp = 768f)
+    }
+
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-xhdpi")
+    fun displayQualifier_1280x800xhdpi_resolves7x6GridSymmetrically() {
+        assertActivityGridProfileMatches(expectedCols = 7, expectedRows = 6, maxWidthDp = 1280f, maxHeightDp = 800f)
+    }
+
+    @Test
+    @Config(qualifiers = "w1920dp-h1080dp-mdpi")
+    fun displayQualifier_1920x1080_centeredDefault_capsAt8Cols() {
+        assertActivityGridProfileMatches(expectedCols = 8, expectedRows = 8, maxWidthDp = 1920f, maxHeightDp = 1080f)
+    }
+
+    @Test
+    @Config(qualifiers = "w2560dp-h1440dp-mdpi")
+    fun displayQualifier_2560x1440_centeredDefault_capsAt8Cols() {
+        assertActivityGridProfileMatches(expectedCols = 8, expectedRows = 11, maxWidthDp = 2560f, maxHeightDp = 1440f)
+    }
+
+    @Test
+    @Config(qualifiers = "w3440dp-h1440dp-mdpi")
+    fun displayQualifier_3440x1440_centeredDefault_capsAt8Cols() {
+        assertActivityGridProfileMatches(expectedCols = 8, expectedRows = 11, maxWidthDp = 3440f, maxHeightDp = 1440f)
+    }
+
+    @Test
+    @Config(qualifiers = "w800dp-h1280dp-port-xhdpi")
+    fun displayQualifier_800x1280portrait_resolves4ColumnsWithoutHudOverlap() {
+        assertActivityGridProfileMatches(expectedCols = 4, expectedRows = 10, maxWidthDp = 800f, maxHeightDp = 1280f)
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h480dp-xhdpi")
+    fun displayQualifier_320x480small_scalesWithoutClippingOrHudOverlap() {
+        assertActivityGridProfileMatches(expectedCols = 4, expectedRows = 4, maxWidthDp = 320f, maxHeightDp = 480f)
+    }
+
+    private fun assertActivityGridProfileMatches(
+        expectedCols: Int,
+        expectedRows: Int,
+        maxWidthDp: Float,
+        maxHeightDp: Float
+    ) {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            val profile = activity.viewModel.uiState.value.gridProfile
+            assertThat(profile.columns).isEqualTo(expectedCols)
+            assertThat(profile.rows).isEqualTo(expectedRows)
+            val totalGridWidth = profile.widthDpForSpan(profile.columns)
+            assertThat(profile.marginDp + totalGridWidth).isAtMost(maxWidthDp + 0.5f)
+            val gridBottom = profile.topMarginDp + profile.heightDpForSpan(profile.rows)
+            assertThat(gridBottom).isAtMost(maxHeightDp - 84f + 0.5f)
+        } finally {
+            tearDownController(controller)
+        }
+    }
 }

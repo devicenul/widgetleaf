@@ -78,6 +78,8 @@ class WidgetDeckActivity : ComponentActivity() {
     private var hasActivityWindowFocus: Boolean = true
     private var creationUptimeMs: Long = 0L
     private var lastHotkeyToggleUptimeMs: Long = -10_000L
+    private var overlayContainerHeightPx: Float = 0f
+    private var overlayBottomInsetPx: Float = 0f
     private val trackpadSwipeAccumulator = TrackpadSwipeAccumulator()
 
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -366,6 +368,22 @@ class WidgetDeckActivity : ComponentActivity() {
                 onOpenContextMenu = viewModel::openContextMenu,
                 onCloseContextMenu = viewModel::closeContextMenu,
                 onReady = viewModel::enablePageAnimations,
+                onViewportMetricsChanged = { metrics ->
+                    overlayContainerHeightPx = metrics.heightPx
+                    overlayBottomInsetPx = metrics.bottomInsetPx
+                    if (metrics.widthDp > 10f && metrics.heightDp > 10f) {
+                        val updatedProfile = container.gridProfileResolver.resolve(
+                            screenWidthDp = metrics.widthDp,
+                            screenHeightDp = metrics.heightDp,
+                            useCenteredBentoCanvas = uiState.settings.useCenteredBentoCanvas,
+                            leftInsetDp = metrics.leftInsetDp,
+                            topInsetDp = metrics.topInsetDp,
+                            rightInsetDp = metrics.rightInsetDp,
+                            bottomInsetDp = metrics.bottomInsetDp
+                        )
+                        viewModel.updateGridProfile(updatedProfile)
+                    }
+                },
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
@@ -550,6 +568,10 @@ class WidgetDeckActivity : ComponentActivity() {
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
             )
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
 
             val blurRadius = if (::viewModel.isInitialized) {
                 viewModel.uiState.value.settings.blurRadiusDp
@@ -799,9 +821,20 @@ class WidgetDeckActivity : ComponentActivity() {
                     state.editingWidgetId == null
                 ) {
                     // Also ignore secondary clicks in the bottom pagination pill band
-                    val screenHeightPx = resources.displayMetrics.heightPixels
                     val density = resources.displayMetrics.density
-                    val inBottomHudBand = ev.y >= (screenHeightPx - 88 * density)
+                    val windowMetrics = windowManager.currentWindowMetrics
+                    val containerHeightPx = overlayContainerHeightPx.takeIf { it > 0f }
+                        ?: windowMetrics.bounds.height().toFloat().takeIf { it > 0f }
+                        ?: resources.displayMetrics.heightPixels.toFloat()
+                    val bottomInsetPx = if (overlayContainerHeightPx > 0f) {
+                        overlayBottomInsetPx
+                    } else {
+                        windowMetrics.windowInsets.getInsetsIgnoringVisibility(
+                            android.view.WindowInsets.Type.navigationBars() or
+                                android.view.WindowInsets.Type.displayCutout()
+                        ).bottom.toFloat()
+                    }
+                    val inBottomHudBand = ev.y >= (containerHeightPx - bottomInsetPx - 88f * density)
                     if (!inBottomHudBand) {
                         viewModel.openContextMenu(Pair(ev.x, ev.y))
                     }

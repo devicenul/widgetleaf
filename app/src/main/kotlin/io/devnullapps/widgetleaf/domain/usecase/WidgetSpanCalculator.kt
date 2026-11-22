@@ -27,16 +27,20 @@ class WidgetSpanCalculator {
         resizeMode: Int,
         profile: DesktopGridProfile
     ): WidgetSpanResult {
+        val minWidthSpan = dpToSpan(minWidthDp, profile.cellWidthDp, profile.gutterDp)
         val defaultSpanX = if (targetCellWidth > 0) {
-            targetCellWidth.coerceIn(1, profile.columns)
+            val requiredMinX = if (minWidthDp > 0f) minWidthSpan else 1
+            maxOf(targetCellWidth, requiredMinX).coerceIn(1, profile.columns)
         } else {
-            dpToSpan(minWidthDp, profile.cellWidthDp, profile.gutterDp).coerceIn(1, profile.columns)
+            minWidthSpan.coerceIn(1, profile.columns)
         }
 
+        val minHeightSpan = dpToSpan(minHeightDp, profile.cellHeightDp, profile.gutterDp)
         val defaultSpanY = if (targetCellHeight > 0) {
-            targetCellHeight.coerceIn(1, profile.rows)
+            val requiredMinY = if (minHeightDp > 0f) minHeightSpan else 1
+            maxOf(targetCellHeight, requiredMinY).coerceIn(1, profile.rows)
         } else {
-            dpToSpan(minHeightDp, profile.cellHeightDp, profile.gutterDp).coerceIn(1, profile.rows)
+            minHeightSpan.coerceIn(1, profile.rows)
         }
 
         val canResizeX = (resizeMode and PlacedWidget.RESIZE_HORIZONTAL) != 0

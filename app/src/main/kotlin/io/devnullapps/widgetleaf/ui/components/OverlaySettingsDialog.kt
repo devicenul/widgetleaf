@@ -11,18 +11,25 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -111,20 +118,29 @@ fun OverlaySettingsDialog(
                 )
         )
 
-        GlassHudSurface(
+        BoxWithConstraints(
             modifier = Modifier
-                .widthIn(max = 580.dp)
-                .fillMaxWidth(0.92f)
-                .heightIn(max = 700.dp)
-                .padding(24.dp)
-                .pointerInput(Unit) {
-                    detectTapGestures { /* Absorb inside taps without merging semantics */ }
-                }
-                .testTag("overlay_settings_dialog"),
-            shape = RoundedCornerShape(22.dp),
-            backgroundColor = WidgetLeafTheme.palette.panelSurface,
-            contentPadding = PaddingValues(24.dp)
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
+                .imePadding(),
+            contentAlignment = Alignment.Center
         ) {
+            val maxDialogHeight = maxHeight.coerceIn(220.dp, 700.dp)
+
+            GlassHudSurface(
+                modifier = Modifier
+                    .widthIn(max = 580.dp)
+                    .fillMaxWidth(0.92f)
+                    .heightIn(max = maxDialogHeight)
+                    .padding(24.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures { /* Absorb inside taps without merging semantics */ }
+                    }
+                    .testTag("overlay_settings_dialog"),
+                shape = RoundedCornerShape(22.dp),
+                backgroundColor = WidgetLeafTheme.palette.panelSurface,
+                contentPadding = PaddingValues(24.dp)
+            ) {
             Column(
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -194,6 +210,7 @@ fun OverlaySettingsDialog(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .weight(1f, fill = false)
                         .verticalScroll(scrollState)
                         .padding(top = 12.dp)
                 ) {
@@ -672,6 +689,7 @@ fun OverlaySettingsDialog(
                             .testTag("settings_version_footer")
                     )
                 }
+            }
             }
         }
     }

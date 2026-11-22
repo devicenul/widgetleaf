@@ -16,8 +16,14 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -25,17 +31,25 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageShader
+import androidx.compose.ui.graphics.ShaderBrush
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import io.devnullapps.widgetleaf.domain.model.OverlaySettings
 import io.devnullapps.widgetleaf.domain.model.PlacedWidget
@@ -47,6 +61,18 @@ import io.devnullapps.widgetleaf.ui.theme.WidgetLeafTheme
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckUiState
 import io.devnullapps.widgetleaf.ui.viewmodel.DeckViewModel
 import kotlin.math.abs
+import kotlin.math.roundToInt
+
+data class OverlayViewportMetrics(
+    val widthDp: Float,
+    val heightDp: Float,
+    val leftInsetDp: Float,
+    val topInsetDp: Float,
+    val rightInsetDp: Float,
+    val bottomInsetDp: Float,
+    val heightPx: Float,
+    val bottomInsetPx: Float
+)
 
 /**
  * Full-screen root composable for the WidgetLeaf frameless multi-page overlay:
@@ -67,75 +93,71 @@ fun WidgetDeckOverlayScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    BoxWithConstraints(
-        modifier = modifier.fillMaxSize()
-    ) {
-        val widthDp = maxWidth.value
-        val heightDp = maxHeight.value
-
-        LaunchedEffect(widthDp, heightDp, uiState.settings.useCenteredBentoCanvas) {
-            if (widthDp > 10f && heightDp > 10f) {
+    WidgetDeckOverlayScreen(
+        uiState = uiState,
+        onDismissOverlay = onDismissOverlay,
+        onSelectPage = viewModel::selectPage,
+        onPreviousPage = viewModel::navigatePreviousPage,
+        onNextPage = viewModel::navigateNextPage,
+        onSwipePrevious = viewModel::swipePreviousPage,
+        onSwipeNext = viewModel::swipeNextPage,
+        canWidgetScroll = canWidgetScroll,
+        onCancelChildTouches = onCancelChildTouches,
+        onOpenWidgetPicker = viewModel::openWidgetPicker,
+        onCloseWidgetPicker = viewModel::closeWidgetPicker,
+        onSearchQueryChange = viewModel::updateWidgetSearchQuery,
+        onAddWidgetAutoPlace = viewModel::addWidgetAutoPlace,
+        onDragOutCatalogItem = { item, cellX, cellY ->
+            viewModel.dropCatalogWidgetAtCell(item, uiState.activePageIndex, cellX, cellY)
+        },
+        onOpenOverlaySettings = viewModel::openOverlaySettings,
+        onCloseOverlaySettings = viewModel::closeOverlaySettings,
+        onUpdateSettings = viewModel::updateSettings,
+        onStartEditPageLabel = viewModel::startEditingPageLabel,
+        onDraftChange = viewModel::updateEditingPageLabelDraft,
+        onCommitPageLabel = viewModel::commitPageLabel,
+        onCancelEditPageLabel = viewModel::cancelEditingPageLabel,
+        onEnterEditMode = viewModel::enterWidgetEditMode,
+        onExitEditMode = viewModel::exitWidgetEditMode,
+        onMoveWidget = { id, x, y ->
+            viewModel.moveWidget(id, x, y)
+        },
+        onResizeWidget = { id, x, y, sx, sy ->
+            viewModel.resizeWidget(id, x, y, sx, sy)
+        },
+        onStartWidgetResize = viewModel::startWidgetResize,
+        onWidgetResizeBoundsChanged = viewModel::onWidgetResizeBoundsChanged,
+        onCommitWidgetResize = viewModel::commitWidgetResize,
+        onCancelWidgetResize = viewModel::cancelWidgetResize,
+        onStartWidgetDrag = viewModel::startWidgetDrag,
+        onWidgetHoverCellChanged = viewModel::onWidgetHoverCellChanged,
+        onCommitWidgetDrag = viewModel::commitWidgetDrag,
+        onCancelWidgetDrag = viewModel::cancelWidgetDrag,
+        onDragAcrossEdge = viewModel::dragWidgetAcrossEdge,
+        onEdgeDwellTriggered = viewModel::onEdgeDwellTriggered,
+        onRemoveWidget = viewModel::removeWidget,
+        onReconfigureWidget = { /* Handled by host activity/flow */ },
+        onOpenContextMenu = viewModel::openContextMenu,
+        onCloseContextMenu = viewModel::closeContextMenu,
+        onViewportMetricsChanged = { metrics ->
+            if (metrics.widthDp > 10f && metrics.heightDp > 10f) {
                 val newProfile = DesktopGridProfileResolver.resolve(
-                    screenWidthDp = widthDp,
-                    screenHeightDp = heightDp,
-                    useCenteredBentoCanvas = uiState.settings.useCenteredBentoCanvas
+                    screenWidthDp = metrics.widthDp,
+                    screenHeightDp = metrics.heightDp,
+                    useCenteredBentoCanvas = uiState.settings.useCenteredBentoCanvas,
+                    leftInsetDp = metrics.leftInsetDp,
+                    topInsetDp = metrics.topInsetDp,
+                    rightInsetDp = metrics.rightInsetDp,
+                    bottomInsetDp = metrics.bottomInsetDp
                 )
                 if (newProfile != uiState.gridProfile) {
                     viewModel.updateGridProfile(newProfile)
                 }
             }
-        }
-
-        WidgetDeckOverlayScreen(
-            uiState = uiState,
-            onDismissOverlay = onDismissOverlay,
-            onSelectPage = viewModel::selectPage,
-            onPreviousPage = viewModel::navigatePreviousPage,
-            onNextPage = viewModel::navigateNextPage,
-            onSwipePrevious = viewModel::swipePreviousPage,
-            onSwipeNext = viewModel::swipeNextPage,
-            canWidgetScroll = canWidgetScroll,
-            onCancelChildTouches = onCancelChildTouches,
-            onOpenWidgetPicker = viewModel::openWidgetPicker,
-            onCloseWidgetPicker = viewModel::closeWidgetPicker,
-            onSearchQueryChange = viewModel::updateWidgetSearchQuery,
-            onAddWidgetAutoPlace = viewModel::addWidgetAutoPlace,
-            onDragOutCatalogItem = { item, cellX, cellY ->
-                viewModel.dropCatalogWidgetAtCell(item, uiState.activePageIndex, cellX, cellY)
-            },
-            onOpenOverlaySettings = viewModel::openOverlaySettings,
-            onCloseOverlaySettings = viewModel::closeOverlaySettings,
-            onUpdateSettings = viewModel::updateSettings,
-            onStartEditPageLabel = viewModel::startEditingPageLabel,
-            onDraftChange = viewModel::updateEditingPageLabelDraft,
-            onCommitPageLabel = viewModel::commitPageLabel,
-            onCancelEditPageLabel = viewModel::cancelEditingPageLabel,
-            onEnterEditMode = viewModel::enterWidgetEditMode,
-            onExitEditMode = viewModel::exitWidgetEditMode,
-            onMoveWidget = { id, x, y ->
-                viewModel.moveWidget(id, x, y)
-            },
-            onResizeWidget = { id, x, y, sx, sy ->
-                viewModel.resizeWidget(id, x, y, sx, sy)
-            },
-            onStartWidgetResize = viewModel::startWidgetResize,
-            onWidgetResizeBoundsChanged = viewModel::onWidgetResizeBoundsChanged,
-            onCommitWidgetResize = viewModel::commitWidgetResize,
-            onCancelWidgetResize = viewModel::cancelWidgetResize,
-            onStartWidgetDrag = viewModel::startWidgetDrag,
-            onWidgetHoverCellChanged = viewModel::onWidgetHoverCellChanged,
-            onCommitWidgetDrag = viewModel::commitWidgetDrag,
-            onCancelWidgetDrag = viewModel::cancelWidgetDrag,
-            onDragAcrossEdge = viewModel::dragWidgetAcrossEdge,
-            onEdgeDwellTriggered = viewModel::onEdgeDwellTriggered,
-            onRemoveWidget = viewModel::removeWidget,
-            onReconfigureWidget = { /* Handled by host activity/flow */ },
-            onOpenContextMenu = viewModel::openContextMenu,
-            onCloseContextMenu = viewModel::closeContextMenu,
-            modifier = Modifier.fillMaxSize(),
-            widgetContent = widgetContent
-        )
-    }
+        },
+        modifier = modifier.fillMaxSize(),
+        widgetContent = widgetContent
+    )
 }
 
 @Composable
@@ -181,11 +203,18 @@ fun WidgetDeckOverlayScreen(
     onCloseContextMenu: () -> Unit = {},
     onReady: () -> Unit = {},
     effectiveScrimAlpha: Float = uiState.settings.scrimAlpha,
+    onViewportMetricsChanged: ((OverlayViewportMetrics) -> Unit)? = null,
     modifier: Modifier = Modifier,
     widgetContent: @Composable (PlacedWidget) -> Unit = { DefaultFramelessWidgetContent(it) }
 ) {
     WidgetLeafTheme(useDynamicColor = uiState.settings.useDynamicColor) {
         val palette = WidgetLeafTheme.palette
+        val density = LocalDensity.current
+        val layoutDirection = LocalLayoutDirection.current
+        val safeSystemInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
+        val grainBrush = remember(density) { createNoiseGrainBrush(density) }
+        val currentViewportCallback by rememberUpdatedState(onViewportMetricsChanged)
+
         var lastContextMenuOpenUptimeMs by remember { mutableLongStateOf(-10_000L) }
         var lastWidgetMutationUptimeMs by remember { mutableLongStateOf(-10_000L) }
 
@@ -202,40 +231,72 @@ fun WidgetDeckOverlayScreen(
             !uiState.isOverlaySettingsOpen &&
             uiState.contextMenuPosition == null
 
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .testTag("widget_deck_overlay_root")
-                .overlaySwipeGestures(
-                    enabled = isSwipeGesturesEnabled,
-                    canWidgetScroll = canWidgetScroll,
-                    onCancelChildTouches = onCancelChildTouches,
-                    onSwipeNext = onSwipeNext,
-                    onSwipePrevious = onSwipePrevious,
-                    onDismiss = onDismissOverlay
-                )
+        BoxWithConstraints(
+            modifier = modifier.fillMaxSize()
         ) {
-            // LAYER 1: Optical Frost Scrim & 2% Procedural Noise Grain
+            val widthDp = maxWidth.value
+            val heightDp = maxHeight.value
+            val leftInsetPx = safeSystemInsets.getLeft(density, layoutDirection)
+            val topInsetPx = safeSystemInsets.getTop(density)
+            val rightInsetPx = safeSystemInsets.getRight(density, layoutDirection)
+            val bottomInsetPx = safeSystemInsets.getBottom(density)
+            val leftInsetDp = with(density) { leftInsetPx.toDp().value }
+            val topInsetDp = with(density) { topInsetPx.toDp().value }
+            val rightInsetDp = with(density) { rightInsetPx.toDp().value }
+            val bottomInsetDp = with(density) { bottomInsetPx.toDp().value }
+            val containerHeightPx = constraints.maxHeight.toFloat().takeIf { it > 0f }
+                ?: with(density) { maxHeight.toPx() }
+
+            LaunchedEffect(
+                widthDp,
+                heightDp,
+                leftInsetDp,
+                topInsetDp,
+                rightInsetDp,
+                bottomInsetDp,
+                containerHeightPx,
+                bottomInsetPx,
+                uiState.settings.useCenteredBentoCanvas
+            ) {
+                currentViewportCallback?.invoke(
+                    OverlayViewportMetrics(
+                        widthDp = widthDp,
+                        heightDp = heightDp,
+                        leftInsetDp = leftInsetDp,
+                        topInsetDp = topInsetDp,
+                        rightInsetDp = rightInsetDp,
+                        bottomInsetDp = bottomInsetDp,
+                        heightPx = containerHeightPx,
+                        bottomInsetPx = bottomInsetPx.toFloat()
+                    )
+                )
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(palette.scrimDark.copy(alpha = effectiveScrimAlpha))
-            )
+                    .testTag("widget_deck_overlay_root")
+                    .overlaySwipeGestures(
+                        enabled = isSwipeGesturesEnabled,
+                        canWidgetScroll = canWidgetScroll,
+                        onCancelChildTouches = onCancelChildTouches,
+                        onSwipeNext = onSwipeNext,
+                        onSwipePrevious = onSwipePrevious,
+                        onDismiss = onDismissOverlay
+                    )
+            ) {
+                // LAYER 1: Optical Frost Scrim & 2% Tiled Procedural Noise Grain
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(palette.scrimDark.copy(alpha = effectiveScrimAlpha))
+                )
 
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val step = 12.dp.toPx()
-                val dotRadius = 0.75.dp.toPx()
-                val grainColor = Color.White.copy(alpha = 0.02f)
-                var x = 0f
-                while (x < size.width) {
-                    var y = if (((x / step).toInt() % 2) == 0) 0f else step / 2f
-                    while (y < size.height) {
-                        drawCircle(color = grainColor, radius = dotRadius, center = Offset(x, y))
-                        y += step
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    if (grainBrush != null) {
+                        drawRect(brush = grainBrush)
                     }
-                    x += step
                 }
-            }
 
             // LAYER 2: Ambient Radial LeafGlow
             val glowColor = palette.leafGlow
@@ -428,6 +489,7 @@ fun WidgetDeckOverlayScreen(
                     onCancelEditPageLabel = onCancelEditPageLabel,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
+                        .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.displayCutout))
                         .padding(bottom = 24.dp)
                 )
             }
@@ -456,8 +518,40 @@ fun WidgetDeckOverlayScreen(
                 onUpdateSettings = onUpdateSettings,
                 onDismissRequest = onCloseOverlaySettings
             )
+            }
         }
     }
+}
+
+internal fun createNoiseGrainBrush(density: Density): ShaderBrush? {
+    val stepPx = with(density) { 12.dp.toPx() }.roundToInt().coerceAtLeast(4)
+    val dotRadiusPx = with(density) { 0.75.dp.toPx() }.coerceAtLeast(0.75f)
+    val tileSize = stepPx * 2
+    val bitmap = try {
+        android.graphics.Bitmap.createBitmap(
+            tileSize,
+            tileSize,
+            android.graphics.Bitmap.Config.ARGB_8888
+        )
+    } catch (_: Throwable) {
+        null
+    } ?: return null
+
+    val canvas = android.graphics.Canvas(bitmap)
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(5, 255, 255, 255)
+        style = android.graphics.Paint.Style.FILL
+    }
+    val halfStep = stepPx / 2f
+    for (x in listOf(0f, tileSize.toFloat())) {
+        for (y in listOf(0f, stepPx.toFloat(), tileSize.toFloat())) {
+            canvas.drawCircle(x, y, dotRadiusPx, paint)
+        }
+    }
+    for (y in listOf(halfStep, stepPx + halfStep)) {
+        canvas.drawCircle(stepPx.toFloat(), y, dotRadiusPx, paint)
+    }
+    return ShaderBrush(ImageShader(bitmap.asImageBitmap(), TileMode.Repeated, TileMode.Repeated))
 }
 
 private enum class SwipeDirection {

@@ -187,4 +187,35 @@ class WidgetSpanCalculatorTest {
         assertEquals(8, result.maxSpanX)
         assertEquals(4, result.maxSpanY)
     }
+
+    @Test
+    fun honorsMinWidthAndMinHeightDpWhenTargetCellSizesAreSmallerOnCompactCells() {
+        val compactProfile = DesktopGridProfile(
+            columns = 4,
+            rows = 4,
+            cellWidthDp = 80f,
+            cellHeightDp = 72f,
+            gutterDp = 16f
+        )
+
+        // targetCellWidth=2 gives 2*80+16=176dp < minWidthDp=250dp -> needs 3 spans (3*80+2*16=272dp)
+        // targetCellHeight=1 gives 72dp < minHeightDp=150dp -> needs 2 spans (2*72+16=160dp)
+        val result = calculator.calculateSpans(
+            targetCellWidth = 2,
+            targetCellHeight = 1,
+            minWidthDp = 250f,
+            minHeightDp = 150f,
+            minResizeWidthDp = 0f,
+            minResizeHeightDp = 0f,
+            maxResizeWidthDp = 0f,
+            maxResizeHeightDp = 0f,
+            resizeMode = PlacedWidget.RESIZE_BOTH,
+            profile = compactProfile
+        )
+
+        assertEquals(3, result.defaultSpanX)
+        assertEquals(2, result.defaultSpanY)
+        assertEquals(3, result.minSpanX)
+        assertEquals(2, result.minSpanY)
+    }
 }

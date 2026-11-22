@@ -4,16 +4,21 @@ import android.os.SystemClock
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -27,8 +32,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -48,22 +53,33 @@ fun DesktopContextMenu(
     if (position == null) return
 
     val density = LocalDensity.current
-    val config = LocalConfiguration.current
-    val screenWidthPx = with(density) { config.screenWidthDp.dp.toPx() }
-    val screenHeightPx = with(density) { config.screenHeightDp.dp.toPx() }
-
-    val menuWidthPx = with(density) { 220.dp.toPx() }
-    val menuHeightPx = with(density) { 120.dp.toPx() }
-
-    // Clamp coordinates to stay on screen
-    val clampedX = position.first.coerceIn(16f, (screenWidthPx - menuWidthPx - 16f).coerceAtLeast(16f))
-    val clampedY = position.second.coerceIn(16f, (screenHeightPx - menuHeightPx - 16f).coerceAtLeast(16f))
-
+    val layoutDirection = LocalLayoutDirection.current
+    val safeInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
     val openedAtUptimeMs = remember(position) { SystemClock.uptimeMillis() }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier.fillMaxSize()
     ) {
+        val containerWidthPx = constraints.maxWidth.toFloat().takeIf { it > 0f }
+            ?: with(density) { maxWidth.toPx() }
+        val containerHeightPx = constraints.maxHeight.toFloat().takeIf { it > 0f }
+            ?: with(density) { maxHeight.toPx() }
+        val leftInsetPx = safeInsets.getLeft(density, layoutDirection).toFloat()
+        val topInsetPx = safeInsets.getTop(density).toFloat()
+        val rightInsetPx = safeInsets.getRight(density, layoutDirection).toFloat()
+        val bottomInsetPx = safeInsets.getBottom(density).toFloat()
+        val marginPx = with(density) { 16.dp.toPx() }
+
+        val menuWidthPx = with(density) { 220.dp.toPx() }
+        val menuHeightPx = with(density) { 120.dp.toPx() }
+
+        // Clamp coordinates within measured container bounds & safe insets using dp-scaled margins
+        val minX = leftInsetPx + marginPx
+        val maxX = (containerWidthPx - rightInsetPx - menuWidthPx - marginPx).coerceAtLeast(minX)
+        val minY = topInsetPx + marginPx
+        val maxY = (containerHeightPx - bottomInsetPx - menuHeightPx - marginPx).coerceAtLeast(minY)
+        val clampedX = position.first.coerceIn(minX, maxX)
+        val clampedY = position.second.coerceIn(minY, maxY)
         // Scrim backdrop for outside click dismissal (ignores trailing release of the opening gesture)
         Box(
             modifier = Modifier
