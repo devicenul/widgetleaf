@@ -13,6 +13,7 @@ jobs:
   build-test-verify:
     name: Lint, Unit/Robolectric Tests, Coverage & Debug APK
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -29,10 +30,10 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run Android Lint & Play Protect Static Checks
-        run: ./gradlew lintDebug --stacktrace
+        run: ./gradlew lintDebug --no-daemon --stacktrace -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
 
       - name: Run Pure JVM, Robolectric & Headless Compose Test Suite + JaCoCo Coverage
-        run: ./gradlew testDebugUnitTest jacocoTestReport --stacktrace
+        run: ./gradlew testDebugUnitTest jacocoTestReport --no-daemon --stacktrace -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
 
       - name: Enforce >= 80% Line Coverage Gate
         run: |
@@ -62,7 +63,7 @@ jobs:
           EOF
 
       - name: Assemble WidgetLeaf-debug.apk
-        run: ./gradlew assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --no-daemon --stacktrace -Dorg.gradle.jvmargs="-Xmx2048m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8"
 
       - name: Upload WidgetLeaf-debug.apk Artifact
         uses: actions/upload-artifact@v7
