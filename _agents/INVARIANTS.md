@@ -204,6 +204,22 @@
   3. **Live Material You Dynamic Theme (`WidgetLeafTheme`):** `WidgetLeafTheme(useDynamicColor)` derives `leafPrimary`, `leafBright`, `leafGlow`, `glassSurface`, `glassSurfaceHover`, `glassBorder`, `scrimDark`, `panelSurface`, `hudSurface`, `menuSurface`, `actionPillSurface`, text tokens, and `MaterialTheme.colorScheme` directly from `dynamicDarkColorScheme(context)` on API 31+ so toggling Material You takes effect immediately across the entire overlay without reopening.
   4. **Configured vs. Effective Scrim Separation & Key Routing:** `WidgetDeckOverlayScreen` takes `effectiveScrimAlpha` separately from `uiState.settings.scrimAlpha` so `OverlaySettingsDialog` always displays and edits the configured scrim opacity. `OverlaySettingsDialog` and `WidgetPickerBottomSheet` absorb inside whitespace taps via `pointerInput(Unit) { detectTapGestures {} }` (without merging semantics descendants), and `WidgetDeckActivity.dispatchKeyEvent` delegates to `super.dispatchKeyEvent` first when dialogs/search/inline editors are active so hotkey recording and text input work reliably.
 
+---
+
+## 8. Widget Interaction & Foreground-Loss Dismissal Semantics
+
+### INV-23: Non-Navigating Widget Interactions Stay Open; Dismiss Only on Actual External Activity Launch
+- **Why:** On Android API 31–35, `AppWidgetHostView.setInteractionHandler` and `RemoteViews.InteractionHandler` are `@hide` internal APIs unavailable without hidden reflection (prohibited by Play Protect / INV-20). Dismissing on widget click itself breaks in-place widgets such as Google Tasks checkboxes, `CompoundButton` responses, `ListView` fill-in broadcasts, widget refresh buttons, and scrollable widgets. Conversely, relying solely on `onStop()` leaves the translucent overlay lingering behind freeform desktop app windows launched from widgets (e.g. Weather), where Android Desktop enters `onPause()` + lost window focus / `onTopResumedActivityChanged(false)` without always calling `onStop()`.
+- **Rule:**
+  1. **Public-API Interaction Tracking:** `DeckAppWidgetHostView` never dismisses on click; in `INTERACTIVE` mode it reports `ACTION_UP` interactions via `onWidgetClickedListener` / `onWidgetInteractionListener` to `WidgetDeckActivity.onInteractiveWidgetClicked`, arming a `2500ms` (`WIDGET_ACTIVITY_LAUNCH_WINDOW_MS`) window.
+  2. **Non-Navigating Interactions Stay Open:** Broadcast/service `PendingIntent`s, API 31+ `CompoundButton` toggle responses, `ListView` `setOnClickFillInIntent` broadcasts, and child scrolling do not pause, stop, or defocus `WidgetDeckActivity`, keeping the overlay open. `WidgetGridPage` uses `indication = null` on widget `combinedClickable` wrappers, computes hit-testing in local grid coordinates, and verifies both down and up positions are outside widget bounds before triggering empty-canvas dismissal.
+  3. **Dismiss Only on Foreground Transfer After Widget Interaction:** `WidgetDeckActivity` dismisses via `finishWithoutAnimation()` when foreground actually transfers to a launched external activity:
+     - `onStop()` while `isRecentInteractiveWidgetClick()` is true;
+     - `onPause()` paired with `!hasWindowFocus` or `onTopResumedActivityChanged(false)` while `isRecentInteractiveWidgetClick()` is true (covers Android Desktop freeform launches);
+     - `onUserLeaveHint()` when outside secondary-click / mutation debounces.
+  4. **Desktop Focus, Internal Flow & Modal Guards:** Transient focus changes (`onWindowFocusChanged(false)` / `onTopResumedActivityChanged(false)`) without `onPause()` or a recent widget click NEVER dismiss. Internal flows (`isLaunchingInternalFlow`, `pendingWidgetAction != null`, `isAwaitingInternalSystemPrompt` for `requestPinQsTile`) and WidgetLeaf's own modals (`isOverlaySettingsOpen`, `isWidgetPickerOpen`, `contextMenuPosition != null`, `editingWidgetId != null`, `editingPageLabelIndex != null`) strictly suppress automatic foreground-loss dismissal.
+
+
 
 
 

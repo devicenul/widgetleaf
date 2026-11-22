@@ -45,7 +45,8 @@ fun DeckWidgetHostContainer(
     modifier: Modifier = Modifier,
     onEnterEditMode: ((Int) -> Unit)? = null,
     onHorizontalPageScroll: ((Float) -> Unit)? = null,
-    onErrorRemoveOrReload: ((Int) -> Unit)? = null
+    onErrorRemoveOrReload: ((Int) -> Unit)? = null,
+    onWidgetClicked: ((Int) -> Unit)? = null
 ) {
     AndroidView<FrameLayout>(
         modifier = modifier.fillMaxSize(),
@@ -77,6 +78,10 @@ fun DeckWidgetHostContainer(
                 }
                 onErrorRemoveOrReload?.let { listener ->
                     onErrorRemoveOrReloadListener = { id -> listener(id) }
+                }
+                onWidgetClicked?.let { listener ->
+                    onWidgetClickedListener = { id -> listener(id) }
+                    onWidgetInteractionListener = { id -> listener(id) }
                 }
             }
             container.addView(hostView)
@@ -110,10 +115,25 @@ fun DeckWidgetHostContainer(
                 }
             }
 
-            hostView?.interactionMode = if (isEditing) {
-                DeckAppWidgetHostView.HostInteractionMode.EDIT_MODE
-            } else {
-                DeckAppWidgetHostView.HostInteractionMode.INTERACTIVE
+            hostView?.apply {
+                interactionMode = if (isEditing) {
+                    DeckAppWidgetHostView.HostInteractionMode.EDIT_MODE
+                } else {
+                    DeckAppWidgetHostView.HostInteractionMode.INTERACTIVE
+                }
+                onEnterEditMode?.let { listener ->
+                    onEnterEditModeListener = { id, _, _ -> listener(id) }
+                }
+                onHorizontalPageScroll?.let { listener ->
+                    onHorizontalPageScrollListener = { delta -> listener(delta) }
+                }
+                onErrorRemoveOrReload?.let { listener ->
+                    onErrorRemoveOrReloadListener = { id -> listener(id) }
+                }
+                onWidgetClicked?.let { listener ->
+                    onWidgetClickedListener = { id -> listener(id) }
+                    onWidgetInteractionListener = { id -> listener(id) }
+                }
             }
         }
     )

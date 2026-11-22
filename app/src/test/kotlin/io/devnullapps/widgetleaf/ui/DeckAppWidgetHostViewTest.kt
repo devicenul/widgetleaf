@@ -249,7 +249,9 @@ class DeckAppWidgetHostViewTest {
     @Test
     fun interactiveModePassesClicksAndInvokesClickListener() {
         var clickedId = -1
+        var interactedId = -1
         hostView.onWidgetClickedListener = { id -> clickedId = id }
+        hostView.onWidgetInteractionListener = { id -> interactedId = id }
 
         val downEvent = createMotionEvent(action = MotionEvent.ACTION_DOWN, x = 40f, y = 40f)
         val upEvent = createMotionEvent(action = MotionEvent.ACTION_UP, x = 40f, y = 40f)
@@ -261,7 +263,9 @@ class DeckAppWidgetHostViewTest {
         upEvent.recycle()
 
         assertThat(clickedId).isEqualTo(42)
+        assertThat(interactedId).isEqualTo(42)
         assertThat(hostView.lastInteractiveClickTimestampMs).isGreaterThan(0L)
+        assertThat(hostView.lastInteractiveInteractionTimestampMs).isGreaterThan(0L)
     }
 
     @Test

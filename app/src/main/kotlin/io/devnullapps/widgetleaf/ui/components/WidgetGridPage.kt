@@ -10,6 +10,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
@@ -126,7 +127,7 @@ fun WidgetGridPage(
 
     fun findWidgetAtPosition(pos: Offset): PlacedWidget? {
         val profile = currentGridProfile
-        val localX = pos.x - gridOffsetInRoot
+        val localX = pos.x
         val localY = pos.y
         return currentWidgets.firstOrNull { w ->
             val leftPx = with(density) {
@@ -267,6 +268,7 @@ fun WidgetGridPage(
                             if (!movedBeyondSlop &&
                                 !consumedByChild &&
                                 hitWidgetOnDown == null &&
+                                findWidgetAtPosition(currentPos) == null &&
                                 sinceContextMs > 400L &&
                                 sinceWidgetActionMs > 350L
                             ) {
@@ -417,7 +419,11 @@ fun WidgetGridPage(
                                 }
                             }
                             .combinedClickable(
-                                onClick = { /* Interactive widget click handled by host view */ },
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = {
+                                    lastWidgetActionTimeMs = SystemClock.uptimeMillis()
+                                },
                                 onLongClick = {
                                     lastWidgetActionTimeMs = SystemClock.uptimeMillis()
                                     onEnterEditMode(widget.appWidgetId)

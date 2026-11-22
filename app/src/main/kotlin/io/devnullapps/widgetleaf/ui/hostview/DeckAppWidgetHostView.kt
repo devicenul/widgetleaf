@@ -23,6 +23,21 @@ import android.widget.TextView
 import io.devnullapps.widgetleaf.ui.gesture.TrackpadGestureClassifier
 import kotlin.math.abs
 
+/**
+ * Custom [AppWidgetHostView] enforcing zero framework padding (INV-13), edit-mode touch routing
+ * (INV-3, INV-11), scrollable child inspection (INV-18), and interactive widget click reporting.
+ *
+ * **Public API Heuristic for Non-Navigating vs. Activity-Launching Widget Interactions (INV-23):**
+ * On Android API 31–35, `AppWidgetHostView.setInteractionHandler` and
+ * `RemoteViews.InteractionHandler` are `@hide` framework APIs unavailable to Play-compliant
+ * third-party hosts without hidden reflection. Instead of dismissing on widget click itself,
+ * [DeckAppWidgetHostView] notifies [onWidgetClickedListener] / [onWidgetInteractionListener]
+ * on interactive `ACTION_UP` events, and [io.devnullapps.widgetleaf.ui.WidgetDeckActivity]
+ * leaves the overlay open for in-place `RemoteViews` interactions (broadcast/service
+ * `PendingIntent`s, API 31+ `CompoundButton` responses, `ListView` fill-in intents, scrolling)
+ * while dismissing only if foreground actually transfers to another activity (`onStop`,
+ * `onUserLeaveHint`, or `onPause` with lost focus / top-resumed state).
+ */
 open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) {
 
     init {
@@ -60,8 +75,10 @@ open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
     var onHorizontalPageScrollListener: ((delta: Float) -> Unit)? = null
     var onErrorRemoveOrReloadListener: ((appWidgetId: Int) -> Unit)? = null
     var onWidgetClickedListener: ((appWidgetId: Int) -> Unit)? = null
+    var onWidgetInteractionListener: ((appWidgetId: Int) -> Unit)? = null
 
     var lastInteractiveClickTimestampMs: Long = 0L
+    var lastInteractiveInteractionTimestampMs: Long = 0L
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var pendingLongPressRunnable: Runnable? = null
@@ -126,10 +143,13 @@ open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
                 val wasLongPress = isLongPressTriggered
                 isLongPressTriggered = false
                 if (!wasLongPress) {
+                    val now = SystemClock.uptimeMillis()
+                    lastInteractiveInteractionTimestampMs = now
+                    onWidgetInteractionListener?.invoke(appWidgetId)
                     val dx = event.x - downX
                     val dy = event.y - downY
                     if (dx * dx + dy * dy <= slop * slop) {
-                        lastInteractiveClickTimestampMs = SystemClock.uptimeMillis()
+                        lastInteractiveClickTimestampMs = now
                         onWidgetClickedListener?.invoke(appWidgetId)
                     }
                 }
@@ -331,11 +351,13 @@ open class DeckAppWidgetHostView(context: Context) : AppWidgetHostView(context) 
             }
             val className = view.javaClass.name
             if (view is AbsListView || view is ScrollView ||
+                view.isScrollContainer ||
                 className.contains("ScrollView") ||
                 className.contains("NestedScrollView") ||
                 className.contains("RecyclerView") ||
                 className.contains("ListView") ||
-                className.contains("StackView")
+                className.contains("StackView") ||
+                className.contains("AdapterViewFlipper")
             ) {
                 return true
             }

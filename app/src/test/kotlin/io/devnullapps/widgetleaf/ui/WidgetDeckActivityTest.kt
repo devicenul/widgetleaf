@@ -801,4 +801,198 @@ class WidgetDeckActivityTest {
             tearDownController(controller)
         }
     }
+
+    private fun setupHostedTestWidget(activity: WidgetDeckActivity): Int {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val shadowAwm = Shadows.shadowOf(AppWidgetManager.getInstance(context))
+        val providerComponent = android.content.ComponentName("com.tasks.test", "TasksWidgetProvider")
+        val info = android.appwidget.AppWidgetProviderInfo().apply {
+            provider = providerComponent
+            minWidth = 140
+            minHeight = 140
+        }
+        shadowAwm.addInstalledProvider(info)
+
+        val item = WidgetCatalogItem(
+            providerPackage = "com.tasks.test",
+            providerClass = "TasksWidgetProvider",
+            appName = "Tasks",
+            widgetLabel = "Tasks List",
+            defaultSpanX = 2,
+            defaultSpanY = 2
+        )
+        activity.viewModel.addWidgetAutoPlace(item)
+        Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        val placed = activity.viewModel.uiState.value.widgets.first()
+        return placed.appWidgetId
+    }
+
+    @Test
+    fun widgetBroadcastClick_keepsOverlayOpen() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            val widgetId = setupHostedTestWidget(activity)
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+            // Dispatch real touch tap (ACTION_DOWN -> ACTION_UP) on a DeckAppWidgetHostView
+            // wired to the activity click callback
+            val hostView = io.devnullapps.widgetleaf.ui.hostview.DeckAppWidgetHostView(context).apply {
+                setAppWidget(widgetId, null)
+                addView(android.widget.CheckBox(context).apply {
+                    text = "Buy milk"
+                    isClickable = true
+                })
+                onWidgetClickedListener = { id -> activity.onInteractiveWidgetClicked(id) }
+            }
+            val now = android.os.SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, 20f, 20f, 0)
+            val up = MotionEvent.obtain(now, now + 20L, MotionEvent.ACTION_UP, 20f, 20f, 0)
+            hostView.dispatchTouchEvent(down)
+            hostView.dispatchTouchEvent(up)
+            down.recycle()
+            up.recycle()
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+            // Clicking a non-navigating widget (e.g. checkbox / broadcast / refresh button) must NOT dismiss the overlay
+            assertThat(hostView.lastInteractiveClickTimestampMs).isGreaterThan(0L)
+            assertThat(activity.isFinishing).isFalse()
+            assertThat(WidgetDeckActivity.isDeckVisible).isTrue()
+
+            // Desktop multi-window focus flicker without pausing/stopping must also keep overlay open
+            activity.onWindowFocusChanged(false)
+            activity.onTopResumedActivityChanged(false)
+            assertThat(activity.isFinishing).isFalse()
+        } finally {
+            tearDownController(controller)
+        }
+    }
+
+    @Test
+    fun activityLaunch_onStopOrFocusLossPauseAfterWidgetClick_dismissesOverlay() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+
+        // 1. Standard activity launch (onStop after widget click) dismisses overlay
+        val intent1 = Intent(context, WidgetDeckActivity::class.java)
+        val controller1 = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent1).setup()
+        try {
+            val activity1 = controller1.get()
+            val widgetId = setupHostedTestWidget(activity1)
+
+            activity1.onInteractiveWidgetClicked(widgetId)
+            assertThat(activity1.isFinishing).isFalse()
+
+            controller1.pause().stop()
+            assertThat(activity1.isFinishing).isTrue()
+        } finally {
+            tearDownController(controller1)
+        }
+
+        // 2. Desktop freeform launch (onPause + lost window focus / top-resumed without onStop) dismisses overlay
+        val intent2 = Intent(context, WidgetDeckActivity::class.java)
+        val controller2 = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent2).setup()
+        try {
+            val activity2 = controller2.get()
+            val widgetId = setupHostedTestWidget(activity2)
+
+            activity2.onInteractiveWidgetClicked(widgetId)
+            assertThat(activity2.isFinishing).isFalse()
+
+            activity2.onWindowFocusChanged(false)
+            activity2.onTopResumedActivityChanged(false)
+            controller2.pause()
+            assertThat(activity2.isFinishing).isTrue()
+        } finally {
+            tearDownController(controller2)
+        }
+    }
+
+    @Test
+    fun internalConfigureFlow_doesNotDismissIncorrectlyOnPauseStopOrUserLeave() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+            val candidate = PlacedWidget(
+                appWidgetId = 515,
+                providerPackage = "com.internal.bind",
+                providerClass = "BindWidget",
+                pageIndex = 0,
+                cellX = 0,
+                cellY = 0,
+                spanX = 2,
+                spanY = 2
+            )
+
+            // Simulate active system ACTION_APPWIDGET_BIND flow (internal flow)
+            val uiStateField = DeckViewModel::class.java.getDeclaredField("_uiState")
+            uiStateField.isAccessible = true
+            @Suppress("UNCHECKED_CAST")
+            val mutableState = uiStateField.get(activity.viewModel) as kotlinx.coroutines.flow.MutableStateFlow<DeckUiState>
+            mutableState.value = mutableState.value.copy(
+                isLaunchingInternalFlow = true,
+                pendingWidgetAction = PendingWidgetAction.RequestBind(
+                    appWidgetId = 515,
+                    providerPackage = "com.internal.bind",
+                    providerClass = "BindWidget",
+                    candidateWidget = candidate
+                )
+            )
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+            activity.onInteractiveWidgetClicked(515)
+            val userLeaveMethod = WidgetDeckActivity::class.java.getDeclaredMethod("onUserLeaveHint")
+            userLeaveMethod.isAccessible = true
+            userLeaveMethod.invoke(activity)
+            activity.onWindowFocusChanged(false)
+            controller.pause().stop()
+
+            assertThat(activity.isFinishing).isFalse()
+        } finally {
+            tearDownController(controller)
+        }
+    }
+
+    @Test
+    fun ownDialogs_doNotDismissOverlay() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val intent = Intent(context, WidgetDeckActivity::class.java)
+        val controller = Robolectric.buildActivity(WidgetDeckActivity::class.java, intent).setup()
+        try {
+            val activity = controller.get()
+
+            // Open Overlay Settings dialog
+            activity.viewModel.openOverlaySettings()
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertThat(activity.viewModel.uiState.value.isOverlaySettingsOpen).isTrue()
+            activity.onWindowFocusChanged(false)
+            controller.pause().stop()
+            assertThat(activity.isFinishing).isFalse()
+
+            // Resume and open Widget Picker bottom sheet
+            controller.start().resume()
+            activity.viewModel.closeOverlaySettings()
+            activity.viewModel.openWidgetPicker()
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertThat(activity.viewModel.uiState.value.isWidgetPickerOpen).isTrue()
+            activity.onWindowFocusChanged(false)
+            controller.pause().stop()
+            assertThat(activity.isFinishing).isFalse()
+
+            // Resume and open Context Menu
+            controller.start().resume()
+            activity.viewModel.closeWidgetPicker()
+            activity.viewModel.openContextMenu(Pair(200f, 200f))
+            Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertThat(activity.viewModel.uiState.value.contextMenuPosition).isNotNull()
+            activity.onWindowFocusChanged(false)
+            controller.pause().stop()
+            assertThat(activity.isFinishing).isFalse()
+        } finally {
+            tearDownController(controller)
+        }
+    }
 }

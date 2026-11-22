@@ -123,6 +123,68 @@ class DeckScreenComposeTest {
     }
 
     @Test
+    fun clickingInsidePlacedWidget_doesNotInvokeOnDismissOverlay() {
+        var dismissed = false
+        var clickedWidgetId = -1
+        val widget = PlacedWidget(
+            appWidgetId = 707,
+            providerPackage = "com.google.android.apps.tasks",
+            providerClass = "TasksWidgetProvider",
+            pageIndex = 0,
+            cellX = 0,
+            cellY = 0,
+            spanX = 3,
+            spanY = 3
+        )
+        val cachedHostView = DeckAppWidgetHostView(ApplicationProvider.getApplicationContext()).apply {
+            setAppWidget(707, null)
+            addView(android.widget.CheckBox(context).apply {
+                text = "Task 1"
+                isClickable = true
+            })
+        }
+
+        composeTestRule.setContent {
+            WidgetDeckOverlayScreen(
+                uiState = DeckUiState(
+                    isReady = true,
+                    pages = listOf(DeckPage(pageIndex = 0, customLabel = null)),
+                    widgets = listOf(widget),
+                    editingWidgetId = null
+                ),
+                onDismissOverlay = { dismissed = true },
+                onSelectPage = {},
+                onPreviousPage = {},
+                onNextPage = {},
+                onOpenWidgetPicker = {},
+                onCloseWidgetPicker = {},
+                onSearchQueryChange = {},
+                onAddWidgetAutoPlace = {},
+                onOpenOverlaySettings = {},
+                onCloseOverlaySettings = {},
+                onUpdateSettings = {},
+                onStartEditPageLabel = {},
+                onCommitPageLabel = { _, _ -> },
+                widgetContent = { placed ->
+                    DeckWidgetHostContainer(
+                        placedWidget = placed,
+                        isEditing = false,
+                        createHostView = { cachedHostView },
+                        onWidgetClicked = { clickedWidgetId = it }
+                    )
+                }
+            )
+        }
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("placed_widget_707").performClick()
+        composeTestRule.waitForIdle()
+
+        assertThat(dismissed).isFalse()
+        assertThat(clickedWidgetId).isEqualTo(707)
+    }
+
+    @Test
     fun multiPagePillsRenderDefaultLabelsAndArrowsLoopCircularly() {
         val pages = listOf(
             DeckPage(pageIndex = 0, customLabel = null),

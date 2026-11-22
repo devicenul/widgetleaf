@@ -72,6 +72,10 @@ class WidgetDeckActivity : ComponentActivity() {
     private var hasRequestedNotificationPermission: Boolean = false
     private var lastSecondaryClickUptimeMs: Long = -10_000L
     private var lastWidgetMutationOrFlowUptimeMs: Long = -10_000L
+    private var lastInteractiveWidgetClickUptimeMs: Long = -10_000L
+    private var isActivityPaused: Boolean = false
+    private var isActivityTopResumed: Boolean = true
+    private var hasActivityWindowFocus: Boolean = true
     private var creationUptimeMs: Long = 0L
     private var lastHotkeyToggleUptimeMs: Long = -10_000L
     private val trackpadSwipeAccumulator = TrackpadSwipeAccumulator()
@@ -428,8 +432,57 @@ class WidgetDeckActivity : ComponentActivity() {
             },
             onErrorRemoveOrReload = { id ->
                 viewModel.removeWidget(id)
-            }
+            },
+            onWidgetClicked = ::onInteractiveWidgetClicked
         )
+    }
+
+    /**
+     * Records an interactive widget touch interaction without dismissing the overlay.
+     * Broadcast/service PendingIntents, CompoundButton responses, and list fill-in updates
+     * keep the pane open; dismissal happens only if foreground actually shifts to another
+     * activity (`onStop`, `onUserLeaveHint`, or `onPause` with lost focus / top-resumed state).
+     */
+    internal fun onInteractiveWidgetClicked(appWidgetId: Int) {
+        if (::viewModel.isInitialized && (viewModel.uiState.value.editingWidgetId != null || hasOverlayModalOpen())) {
+            return
+        }
+        lastInteractiveWidgetClickUptimeMs = SystemClock.uptimeMillis()
+    }
+
+    private fun isRecentInteractiveWidgetClick(nowMs: Long = SystemClock.uptimeMillis()): Boolean {
+        val elapsed = nowMs - lastInteractiveWidgetClickUptimeMs
+        return elapsed in 0L..WIDGET_ACTIVITY_LAUNCH_WINDOW_MS
+    }
+
+    private fun isInternalFlowOrSystemPromptActive(): Boolean {
+        if (isAwaitingInternalSystemPrompt) return true
+        if (::viewModel.isInitialized) {
+            val state = viewModel.uiState.value
+            if (state.isLaunchingInternalFlow || state.pendingWidgetAction != null) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun hasOverlayModalOpen(): Boolean {
+        if (!::viewModel.isInitialized) return false
+        val state = viewModel.uiState.value
+        return state.isOverlaySettingsOpen ||
+            state.isWidgetPickerOpen ||
+            state.contextMenuPosition != null ||
+            state.editingWidgetId != null ||
+            state.editingPageLabelIndex != null
+    }
+
+    private fun evaluateForegroundLossDismissalAfterWidgetClick() {
+        if (isFinishing || isDestroyed || isChangingConfigurations) return
+        if (!isActivityPaused) return
+        if (hasActivityWindowFocus && isActivityTopResumed) return
+        if (!isRecentInteractiveWidgetClick()) return
+        if (isInternalFlowOrSystemPromptActive() || hasOverlayModalOpen()) return
+        finishWithoutAnimation()
     }
 
     private fun launchWidgetConfigurationTrampoline(
@@ -568,7 +621,10 @@ class WidgetDeckActivity : ComponentActivity() {
         activeInstance = this
         isDeckVisible = true
         wasAlreadyResumed = true
+        isActivityPaused = false
+        isActivityTopResumed = true
         isAwaitingInternalSystemPrompt = false
+        lastInteractiveWidgetClickUptimeMs = -10_000L
         if (::viewModel.isInitialized && viewModel.uiState.value.pendingWidgetAction == null) {
             viewModel.markLaunchingInternalFlow(false)
         }
@@ -595,9 +651,27 @@ class WidgetDeckActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        isActivityPaused = true
         isDeckVisible = false
         wasAlreadyResumed = false
         super.onPause()
+        evaluateForegroundLossDismissalAfterWidgetClick()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        hasActivityWindowFocus = hasFocus
+        if (!hasFocus) {
+            evaluateForegroundLossDismissalAfterWidgetClick()
+        }
+    }
+
+    override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
+        super.onTopResumedActivityChanged(isTopResumedActivity)
+        isActivityTopResumed = isTopResumedActivity
+        if (!isTopResumedActivity) {
+            evaluateForegroundLossDismissalAfterWidgetClick()
+        }
     }
 
     override fun onUserLeaveHint() {
@@ -605,7 +679,7 @@ class WidgetDeckActivity : ComponentActivity() {
         val now = SystemClock.uptimeMillis()
         if (now - lastSecondaryClickUptimeMs < 600L ||
             now - lastWidgetMutationOrFlowUptimeMs < 1500L ||
-            isAwaitingInternalSystemPrompt
+            isInternalFlowOrSystemPromptActive()
         ) {
             return
         }
@@ -615,12 +689,20 @@ class WidgetDeckActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        val shouldDismissOnStop = !isFinishing &&
+            !isChangingConfigurations &&
+            !isInternalFlowOrSystemPromptActive() &&
+            !hasOverlayModalOpen() &&
+            isRecentInteractiveWidgetClick()
         container.widgetHostGateway.stopListening()
         if (activeInstance === this) {
             activeInstance = null
         }
         isDeckVisible = false
         super.onStop()
+        if (shouldDismissOnStop) {
+            finishWithoutAnimation()
+        }
     }
 
     override fun onDestroy() {
@@ -644,12 +726,36 @@ class WidgetDeckActivity : ComponentActivity() {
     private fun findWidgetAtScreenPoint(screenX: Float, screenY: Float): PlacedWidget? {
         if (!::viewModel.isInitialized) return null
         val state = viewModel.uiState.value
+        val activeWidgets = state.activePageWidgets
+        val decorView = window?.decorView
+        val hasDecor = decorView != null && decorView.isAttachedToWindow
+        val windowCoords = IntArray(2)
+        if (hasDecor) {
+            decorView!!.getLocationOnScreen(windowCoords)
+        }
+        val viewCoords = IntArray(2)
+        for (w in activeWidgets) {
+            val hostView = container.widgetDeckHost.getHostView(w.appWidgetId)
+            if (hostView != null && hostView.isAttachedToWindow && hostView.width > 0 && hostView.height > 0) {
+                hostView.getLocationOnScreen(viewCoords)
+                val relX = (viewCoords[0] - if (hasDecor) windowCoords[0] else 0).toFloat()
+                val relY = (viewCoords[1] - if (hasDecor) windowCoords[1] else 0).toFloat()
+                if (screenX >= relX &&
+                    screenX <= (relX + hostView.width) &&
+                    screenY >= relY &&
+                    screenY <= (relY + hostView.height)
+                ) {
+                    return w
+                }
+            }
+        }
+
         val profile = state.gridProfile
         val density = resources.displayMetrics.density
         val localXDp = screenX / density
         val localYDp = screenY / density
 
-        return state.activePageWidgets.firstOrNull { w ->
+        return activeWidgets.firstOrNull { w ->
             val leftDp = profile.marginDp + w.cellX * (profile.cellWidthDp + profile.gutterDp)
             val topDp = profile.topMarginDp + w.cellY * (profile.cellHeightDp + profile.gutterDp)
             val widthDp = profile.widthDpForSpan(w.spanX)
@@ -918,6 +1024,7 @@ class WidgetDeckActivity : ComponentActivity() {
     companion object {
         const val TAG = "WidgetDeckActivity"
         private const val REQUEST_CODE_CONFIGURE_WIDGET = 4042
+        internal const val WIDGET_ACTIVITY_LAUNCH_WINDOW_MS = 2500L
         var testContainerOverride: AppContainer? = null
 
         private var activeInstanceRef: WeakReference<WidgetDeckActivity>? = null
